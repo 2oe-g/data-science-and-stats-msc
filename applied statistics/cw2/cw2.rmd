@@ -1,0 +1,1703 @@
+---
+title: "MA50258 Applied Statistics: Coursework 2"
+author: "Zoë Ganess"
+output:
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float: yes
+    code_download: yes
+    code_folding: hide
+    fig_width: 10
+    fig_height: 8
+  pdf_document:
+    keep_tex: yes
+    number_sections: yes
+    fig_width: 10
+    fig_height: 8
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE,dpi=300)
+```
+
+```{r libraries,echo= FALSE}
+# include your libraries here
+# use echo = FALSE if you do not want the Code button to appear 
+library(plyr)
+library(dplyr)
+library(tidyverse)
+library(modelr)
+library(lme4)  
+library(kableExtra)
+library(tidyverse)
+library(broom)
+library(mlmRev)
+library(rcompanion)
+library(moments)
+library(effects)
+library(reshape2)
+library(car)
+library(janitor)
+library(ggpubr)
+library(ggplot2)
+library(gridExtra)
+library(HLMdiag)
+```
+
+
+<!--
+You can include non-coding comments using these delimiters. What is written inside these delimiters wont be knitted into the html document!
+
+Do not change the structure of the document, just fill in the sections as indicated 
+You can only change the headings indicated with [*]
+-->
+
+# The Effect of Socioeconomic Factors on Infant Mortality Rate: Accounting for Differences between Countries, Continents, Regions and Time
+
+The Sustainable development goals (SDG) data presents itself as a multilevel data problem. Information is reported longitudinally over time, from 2013 to 2017, for each country. Not only does this imply that time itself influences changes any outcome variable of interest, which in this case is infant mortality rate, but countries also have internal trends and characteristics which are influential. There is further complexity considering that countries are nested in continents and regions, such that regional and continental trends may have some additional influence; time-based trends can be different across countries and continents also.
+
+Considering this, in order to determine the effect of socioeconomic factors on infant mortality rate, we firstly simplify things and only look at the the relationship between infant mortality rate and time and how that relationship differs across continent and country. Then, by implementing a mixed effect model, we are able to quantify the variability in infant mortality rate between countries (via the random effects) as well as investigate the relationship between socioeconomic factors and infant mortality rate (via the fixed effects).
+
+NB: where (*) appears, that plot/table/graph etc. was not included due to the page limit but is not central to the main analysis...refer to rmarkdown file for original output.
+
+```{r}
+sdg <- read_csv("https://people.bath.ac.uk/kai21/MA50258/data/sdg.csv")
+```
+
+```{r, eval=FALSE}
+count.NA<- function(x){
+  sum(is.na(x))
+}
+
+tab1 <-sdg %>%
+  summarise(across(everything(), count.NA)) 
+
+ kable(t(tab1),caption="Number of missing values by variable") %>% 
+   kable_styling(bootstrap_options = "striped", full_width = F )
+```
+
+```{r}
+sdg <- 
+  sdg %>% 
+  na.omit() %>%
+    mutate(country  = factor(country),
+           continent = factor(continent),
+           income_class = factor(income_class),
+           region = factor(region),
+           year      = as.integer(year),
+           yearc = year - 2015,
+           edu = cut_number(years_education, 3)) %>%
+  mutate(edu = fct_recode(edu,
+                                   .low = levels(edu)[1], 
+                                   .medium = levels(edu)[2], 
+                                   .high = levels(edu)[3]))
+
+```
+
+```{r,eval=FALSE}
+kable(cor(sdg[,-c(1,2,3,4,9,10,11)]),
+      digits=2) %>%  
+        kable_styling(bootstrap_options = "striped", full_width = F )
+pairs(sdg[,-c(1,2,3,4,9,10,11)])
+
+
+```
+
+After adjusting the dataframe so as to omit any missing values and with re-encoded variables (note that year was centered around 2015), in order to visualise the data, we first plot a histogram of the frequency of the respective infant mortality rates, which demonstrates a strong positive skew as seen below (*). Hence, we should anticipate having to either fit a Gamma generalised linear model or a transformed linear model in order to best model the data.
+
+```{r, eval=FALSE}
+
+plotNormalHistogram(sdg$infant_mortality_rate)
+skewness(sdg$infant_mortality_rate, na.rm = TRUE) # positively skewed
+```
+
+Before implementing any models, it seemed sensible to carry out some basic exploratory analysis. In particular, we first want to determine how infant mortality rate changes over time for each country, at the most baseline level.
+
+```{r}
+plot_basic <- sdg %>% ggplot(aes(year, infant_mortality_rate, group = country, col = continent)) + geom_line() +geom_smooth(method = "lm", aes(color = NULL, group = NULL), 
+              color = "grey60", size = 1, linetype = "21",
+              se = FALSE, show.legend = FALSE) + 
+  annotate(geom = "label", label = "Global Trend", x = 2013, y = 13,
+           size = 2.5, color = "grey60")
+
+```
+
+```{r}
+sdg <-
+  sdg %>% 
+    mutate(country = fct_reorder(.f   = country,
+                                 .x   = infant_mortality_rate,
+                                 .fun = mean))
+plot_mean <- sdg %>% 
+  ggplot(aes(y = country,
+             x = infant_mortality_rate,
+             col="Raw data")) +
+      geom_point() +
+          geom_point(aes(col= "Country Mean"),
+                     stat = "summary", 
+                     fun = "mean", 
+                     size = 2) +
+            labs(col = "Type")
+```
+
+```{r}
+
+#out.width="250px", out.height="250px" args used for pdf
+
+plot_basic
+plot_mean
+```
+```{r,eval=FALSE}
+mod_mean_conts <- lm(infant_mortality_rate ~  continent - 1,
+            sdg) 
+tidy(mod_mean_conts)[,1:2] %>% kable()
+```
+
+```{r,eval=FALSE}
+mod_mean_coun <- lm(infant_mortality_rate ~  country - 1,
+            sdg) 
+
+
+means_max <- sort(coef(mod_mean_coun), decreasing=TRUE)%>% tidy() 
+means_min <- sort(coef(mod_mean_coun), decreasing=FALSE)%>% tidy() 
+means_max[1:3,]
+means_min[1:3,]
+
+```
+
+From the first plot above, it is clear that there is a general decreasing trend in infant mortality rate as time goes on. Likewise, we can infer that countries in Africa tend to have higher infant mortality rates (with an overall average of 46.3) when compared to countries in Europe (with an overall average of 3.8). Further supporting this notion, from the second plot we can see that Guinea has the highest average infant mortality rate of 69.6 whereas Finland has the lowest of 1.8 (specific means derived using basic linear model (*) with country as explanatory variable).
+
+
+
+```{r,eval=FALSE}
+fmla_null <- (infant_mortality_rate) ~ 1 + yearc
+mod_null  <- lm(fmla_null, 
+                 sdg)
+
+tidy(mod_null)
+```
+
+By fitting a model with year as the only fixed effect, we can see that when the year is zero, or in 2013, the average infant mortality rate is 12.25, and it decreases by 0.18 units each year after that. However, under this model, the underlying structure of the data is ignored; none of the country-specific or region-specific trends that might also influence life expectancy are accounted for. This is clear from the prediction plot below (*) which depicts the same overall trend line, rather than one for each specific country. Note that this line corresponds to the global trend line indicated in the first plot.
+
+```{r,eval=FALSE}
+sdg %>% 
+  add_predictions(mod_null) %>% 
+    ggplot(aes(x     = yearc, 
+               y     = pred, 
+               group = country)) + 
+      geom_line(alpha = 0.2,
+                col   = "blue") +
+        geom_line(aes(x = yearc,
+                       y = (infant_mortality_rate),
+                        group = country,
+                      col = country), 
+                   alpha = 0.2) +
+          ylab("log(infant_mortality_rate)")
+```
+
+The model building process began from this initial point. From the plots, it is clear that each country has a different intercept, but it is less clear whether the slopes differ, hence making it sensible to explore the difference between a random intercept model and a random intercept + slope model. Before this, however, I ensured that incorporation of `country` as a random effect was warranted. (*) In particular, under the initial random intercept model (log transformed), there was a country-to-country variability of 1.014278; since this value is more than zero, this inclusion is supported. Interestingly, under the corresponding null model (log transformed), the fixed effects are estimated at 2.01943330 versus 2.22713645 under the initial random intercept model (log transformed), hence implying that the data is imbalanced; in other words, some countries have more data points than others.
+
+```{r,eval=FALSE}
+fmla_null_0 <- (log(infant_mortality_rate) ~ 1 + yearc)
+mod_null_0  <- lm(fmla_null_0, 
+                 sdg)
+
+summary(mod_null_0)$coefficients[1,1:3] 
+sigma(mod_null_0)
+# fixed effects differ.....imbalanced data...log imr....#1
+```
+
+```{r}
+
+# years are fixed
+# countries are random effects...continents as well 
+
+fmla_int <- log(infant_mortality_rate) ~  1+(1|country) + yearc   
+
+mod_int  <- lmer(fmla_int, 
+                 sdg)
+
+mod_int_ML <- lmer(fmla_int, sdg, REML = FALSE)
+```
+```{r,eval=FALSE}
+summary(mod_int)$coefficients 
+VarCorr(mod_int)#...estimate not equal to zero hence country to country variability is sufficient to incorporate random effects into model
+# fixed estimates different under mixed model vs null model
+# country to country variability of 1.014278 and within country variability of 0.035094
+```
+
+```{r}
+fmla_int_slo <- log(infant_mortality_rate) ~ yearc + (1 + yearc|country) #3
+mod_int_slope <- lmer(fmla_int_slo, 
+              sdg)
+mod_int_slope_ML <- lmer(fmla_int_slo, sdg, REML = FALSE)
+```
+\small
+```{r}
+anova(mod_int_slope_ML,mod_int_ML) #slope + re model better
+```
+\normalsize
+
+From the above output, we can see that the p-value corresponding to random intercept + slope model is significantly less than 0.05, hence inferring that this model improves upon the initial random intercept model. (*) This is also supported by the prediction plot below which visually shows an improved fit to the data. 
+
+```{r,eval=FALSE}
+sdg %>% 
+  add_predictions(mod_int_slope) %>% 
+    ggplot(aes(x     = yearc, 
+               y     = exp(pred), 
+               group = country)) + 
+      geom_line(alpha = 0.5, col = "black") +
+        geom_line(aes(x = yearc,
+                       y = (infant_mortality_rate),
+                        group = country,
+                      col = country), 
+                   alpha = 0.2) +
+          ylab("(infant_mortality_rate)")
+```
+
+```{r}
+rand_eff_int_slo <- 
+  ranef(mod_int_slope)$country %>% 
+   as_tibble(rownames = "country")
+```
+
+
+```{r}
+
+sdg_by_country <- sdg %>% 
+                    group_by(country, continent) %>% 
+                      nest()
+country_model <- function(df){
+  lm(log(infant_mortality_rate) ~ yearc, data = df)
+}
+sdg_by_country <- sdg_by_country %>% 
+                      mutate(model = map(data, country_model))
+sdg_by_country <- sdg_by_country %>% 
+                      mutate(coefs     =  map(model,coefficients),
+                             intercept =  map_dbl(coefs,"(Intercept)"),
+                             slope     =  map_dbl(coefs,"yearc"))
+
+sdg_by_country <- sdg_by_country %>% 
+  na.omit()
+sdg_by_country <- sdg_by_country %>% 
+  mutate(interceptc = (intercept) - mean(sdg_by_country$intercept),
+           slopec = (slope) - mean(sdg_by_country$slope)) 
+
+plt<- rand_eff_int_slo %>% 
+  ggplot(aes(x = `(Intercept)`,
+             y = yearc,
+             label=country)) +
+    geom_point(aes(col="Random"),
+               alpha=0.5) +
+      geom_text(size=3, 
+                nudge_y = -0.0025) +
+        labs(x   = "Intercept", 
+             y   = "Slope",
+             col = "Effect") +
+          geom_point(data= sdg_by_country,
+                     aes(x = interceptc,
+                         y = slopec,
+                         col = "Fixed"),
+                     alpha=0.4)
+
+#inconsistent shrinkage...random effects are not normally distributed
+```
+
+```{r}
+plt
+```
+
+From the plot of the estimated fixed and random effects, there is some inconsistency with shrinkage as some random effect points appear to be closer to (0,0) whereas others do not. Hypothesising why this may be, one plausible reason is that the current random effects are not distributed normally with mean 0 and a constant variance, this of which is an assumption for random effect variables. From the plot, we can also infer that countries to the top of the plot, such as Greece and Denmark, have the quickest growing infant mortality rate whereas those to the bottom, such as Latvia and Finland, have the quickest decreasing infant mortality rate.
+
+```{r}
+diagnostics0 <-
+  data.frame(residuals   = residuals(mod_int_slope),
+             fitted_vals = fitted(mod_int_slope),
+             country     = sdg$country)  
+```
+
+```{r}
+resid0_fit <-diagnostics0 %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() + geom_smooth() +
+      geom_hline(yintercept = 0,
+                 col="red") +  
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 0")
+```
+
+```{r}
+ordered_country<-sdg$country[order(diagnostics0$residuals)]
+
+resid0<- diagnostics0 %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 0 (Residuals)")
+```
+
+
+```{r}
+ranefs<-ranef(mod_int_slope)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid0_slope <- ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid0_int <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r,eval=FALSE}
+grid.arrange(resid0_fit,resid0,resid0_slope,resid0_int,ncol=2)
+```
+
+Considering that variability not only exists from country to country, but the fact that there is also the possibility of regional and continental differences, I then decided to explore the inclusion of `region` and `continent` as random effects.
+
+```{r, eval=FALSE}
+isNested(sdg$country, sdg$region)
+isNested(sdg$region, sdg$continent)
+```
+\small
+```{r}
+fmla_cont <- log(infant_mortality_rate) ~ yearc + (1 + yearc|country) + (1|region) #3
+mod_cont <- lmer(fmla_cont, 
+              sdg)
+mod_cont_ML <- lmer(mod_cont, sdg, REML = FALSE)
+
+
+fmla_cont_reg <- log(infant_mortality_rate) ~ yearc + (1 + yearc|country) + (1|region) + (1|continent)
+mod_cont_reg <- lmer(fmla_cont_reg, 
+              sdg)
+mod_cont_reg_ML <- lmer(fmla_cont_reg, sdg, REML = FALSE)
+
+anova(mod_int_slope_ML,mod_cont_ML,mod_cont_reg_ML) # include continent and region random effects term
+```
+\normalsize
+
+From the above output, the addition of the two random effects prove to be beneficial as the corresponding p-value is less than 0.05.
+
+Now, using LOESS smoothing plots as seen below (*), I was able to determine the type of relationship the respective explanatory variables had with infant mortality rate. In particular, log transforming `infant_mortality_rate` proved to improve the fit of the data (hence why this transformation was used in the models thus far); log transforming `gdp` and cubing `life_expectancy` allowed for improved fit whereas `years_education` was retained as a linear term.
+
+```{r,eval=FALSE}
+gdp_plot<-sdg %>%
+  ggplot(aes(gdp, infant_mortality_rate)) +
+  geom_point() +
+  scale_y_continuous(trans = "log") +
+  scale_x_continuous(trans = "log") +
+  coord_trans(x = scales::exp_trans(exp(1)),y = scales::exp_trans(exp(1))) +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 1, raw = T),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green")) + ylab("infant_mortality_rate(log)") +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+edu_plot<-sdg %>%
+  ggplot(aes(years_education, infant_mortality_rate)) +
+  geom_point() + 
+  scale_y_continuous(trans = "log") + #scale_x_continuous(trans = "log") +
+  geom_smooth(method = lm, formula = y ~ poly(x,1),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green"))+ ylab("infant_mortality_rate(log)") +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+lifexp_plot<-sdg %>%
+  ggplot(aes(life_expectancy, infant_mortality_rate)) +
+  geom_point() + 
+  scale_y_continuous(trans = "log") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 1, raw = T),
+              se = F, aes(col = "blue")) +ylab("infant_mortality_rate(log)") +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 3, raw = T),
+              se = F, aes(col = "green")) +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Cubic"), guide = "legend")
+
+
+gdp_plot
+lifexp_plot
+edu_plot
+```
+
+```{r}
+
+fmla_build <- log(infant_mortality_rate) ~ 1  + poly(life_expectancy,3)  + (1 + yearc | country) + yearc + log(gdp) + years_education + (1|continent) + (1|region)
+
+mod_build <- lmer(fmla_build,sdg)
+
+mod_build_ML <- lmer(fmla_build,sdg, REML = FALSE)
+```
+
+```{r,eval=FALSE}
+drop1(mod_build_ML,test="Chisq") # remove gdp and ye
+```
+
+From the above output (*), we can see that removing `years_education` and `log(gdp)` would result in some model improvement. We test this by removing the variables and using ANOVA to compare the models as seen below:
+
+\small
+```{r}
+fmla_rm  <- log(infant_mortality_rate) ~ 1  + poly(life_expectancy,3)  + (1 + yearc | country) + yearc + (1|continent) + (1|region)
+
+mod_rm <- lmer(fmla_rm,sdg)
+
+mod_rm_ML <- lmer(fmla_rm,sdg, REML = FALSE)
+
+anova(mod_rm_ML,mod_build_ML)  # keep all...all except gdp and ye
+```
+\normalsize
+
+We can now confirm that the two variables did not in fact add anything to our model, and so we retain the reduced model going forward.
+
+When considering whether to include interaction terms, it is fairly reasonable to assume that there might be significant differences in infant mortality rate due to income class differences between regions. 
+
+```{r}
+ic_reg<- sdg %>% 
+     ggplot(aes(x = region,
+                y = infant_mortality_rate,
+                col = income_class,
+     )) +
+     geom_point()+
+     geom_line(aes(col = income_class,
+                   group=income_class),
+               stat = "summary",
+               fun = "mean")
+ic_cont<-sdg %>% 
+     ggplot(aes(x = continent,
+                y = infant_mortality_rate,
+                col = income_class,
+     )) +
+     geom_point()+
+     geom_line(aes(col = income_class,
+                   group=income_class),
+               stat = "summary",
+               fun = "mean")
+```
+
+```{r}
+ic_reg
+ic_cont
+#prop of high income is greater than low income
+# interaction between income and continent?
+```
+
+The plots above contain substantial information about the data. Firstly, lower class regions tend to have a higher average infant mortality rate, followed by lower middle class regions then upper middle class regions, while upper class regions have the lower rates. Since regions are nested within continents, we can easier visualise the relationship from the second plot. Notably, Africa does not have any high income class regions, Oceania and Europe only have high and upper middle class income regions and the Americas do not have any lower class income regions; Asia is the only continent with regions of all income classes. We also note the higher proportion of high and upper middle income class regions when compared lower middle and low income class regions. Lastly, notice how many regions only consist of one income class rather than a mix.
+
+```{r}
+# many regions only have one type of income class in the study
+
+fmla_re  <- log(infant_mortality_rate) ~ poly(life_expectancy,3)  + (1 + yearc | country) + yearc + income_class + (1|region) + (1|continent)
+
+mod_re <- lmer(fmla_re,sdg)
+
+mod_re_ML <- lmer(fmla_re,sdg, REML = FALSE)
+
+```
+\small
+```{r}
+#There might be income class significant differences between regions
+fmla_inter <- log(infant_mortality_rate)~ income_class +(1+ yearc|country) + yearc +  poly(life_expectancy,3) + (1|continent) + (1|income_class:region) #use
+
+mod_inter <- lmer(fmla_inter,sdg)
+
+mod_inter_ML <- lmer(fmla_inter,sdg,REML = FALSE)
+
+anova(mod_re_ML,mod_inter_ML) # check residuals and qqplot
+```
+\normalsize
+
+From the above output, we can now retain the composite random effects term as we reject the null hypothesis of it being insignificant in our model at the 95% confidence interval. 
+
+```{r,eval=FALSE}
+fmla_income_by_reg  <- log(infant_mortality_rate) ~ poly(life_expectancy,3)  + (1 + yearc | country) + yearc + (income_class|region) + income_class + (1|continent)
+
+mod_income_by_reg <- lmer(fmla_income_by_reg,sdg)
+
+mod_income_by_reg_ML <- lmer(fmla_income_by_reg,sdg, REML = FALSE)
+
+anova(mod_inter_ML,mod_income_by_reg_ML)  # stick to former model due to warning...inclusion results in perfect correlation
+```
+
+```{r}
+diagnostics_1 <-
+  data.frame(residuals   = residuals(mod_inter),
+             fitted_vals = fitted(mod_inter),
+             country     = sdg$country)  
+```
+
+```{r}
+resid1_fit <- diagnostics_1 %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  geom_smooth() +
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 1")
+```
+
+```{r}
+ordered_country<-sdg$country[order(diagnostics_1$residuals)]
+
+resid1 <- diagnostics_1 %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+ 
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 1 (Residuals)")
+```
+
+```{r}
+ranefs<-ranef(mod_inter)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid1_slope <- ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid1_int <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+ranefs_region<-ranef(mod_inter)$`income_class:region` %>% as_tibble(rownames = "income_class:region") 
+ordered_region<-ranefs_region$`income_class:region`[order(ranefs_region$`(Intercept)`)]
+
+resid1_region<-ranefs_region %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_region,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "IncomeClass:Region (random effects)")
+```
+
+```{r}
+ranefs_continent<-ranef(mod_inter)$continent %>% as_tibble(rownames = "continent") 
+ordered_continent<-ranefs_continent$continent[order(ranefs_continent$`(Intercept)`)]
+
+resid1_cont <-ranefs_continent %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_continent,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "Continent (random effects)")
+```
+
+```{r,eval=FALSE}
+grid.arrange(resid1_fit,resid1,resid1_slope,resid1_int,resid1_region,resid1_cont,ncol=3)
+```
+
+From the diagnostic plots above (*), we can see that the normality assumption is in doubt due to the deviations in the qqplots. Notably, most of this is due to data corresponding to Europe and America as inferred from the random effects plot for Continent. 
+
+Recalling the strong positive skew in the data, I then implemented a Gamma log-linked GLMM in an attempt to improve the model even further. I created two models and used the same variables as the previous model, the only difference being that for one model I also tried to allow income class random effects by region via `(income_class|region)`. 
+
+```{r}
+mod_glm_reg <- 
+  glmer((infant_mortality_rate) ~ poly(life_expectancy,3)  + (1 + yearc | country) + yearc + (income_class|region) + (1|continent) + income_class,
+        data = sdg, 
+        family = Gamma(link = "log"))
+
+mod_glm_inter <- 
+  glmer((infant_mortality_rate) ~ income_class +(1+ yearc|country) + yearc +  poly(life_expectancy,3) + (1|continent) + (1|income_class:region),
+        data = sdg, 
+        family = Gamma(link = "log")) 
+
+#19 regions and 4 income classes but only 32 distinct combinations of income_class:region....many regions only have one income class
+
+```
+\small
+
+```{r}
+anova(mod_glm_inter, mod_glm_reg)
+```
+\normalsize
+
+From the ANOVA output, we fail to reject the null hypothesis and so, we retain the GLMM with the original composite random effects term.  
+
+```{r}
+diagnostics_glm <-
+  data.frame(residuals   = residuals(mod_glm_inter),
+             fitted_vals = fitted(mod_glm_inter),
+             country     = sdg$country)  # country is used for labelling points in plots!
+```
+
+```{r}
+resid2_fit <- diagnostics_glm %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  geom_smooth() +
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 2 (GLMM)")
+```
+
+```{r}
+ordered_country<-sdg$country[order(diagnostics_glm$residuals)]
+
+resid2 <-diagnostics_glm %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+ 
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 2 (Residuals)")
+```
+
+```{r}
+ranefs<-ranef(mod_glm_inter)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid2_slope <-ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid2_int<-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+ranefs_region<-ranef(mod_glm_inter)$`income_class:region` %>% as_tibble(rownames = "income_class:region") 
+ordered_region<-ranefs_region$`income_class:region`[order(ranefs_region$`(Intercept)`)]
+
+resid2_region<-ranefs_region %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_region,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "IncomeClass:Region (random effects)")
+```
+
+```{r}
+ranefs_continent<-ranef(mod_glm_inter)$continent %>% as_tibble(rownames = "continent") 
+ordered_continent<-ranefs_continent$continent[order(ranefs_continent$`(Intercept)`)]
+
+resid2_cont <-ranefs_continent %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_continent,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "Continent (random effects)")
+```
+
+```{r}
+grid.arrange(resid2_fit,resid2,resid2_slope,resid2_int,resid2_region,resid2_cont,ncol=3)
+```
+
+From the diagnostic plots above, there seems to be improvement in terms of the general qqplot such that there are less extreme deviations. However, when examining the qqplot for `incomeclass:region`, we now see a new pattern that appears almost polynomial in nature. The qqplot for continent still shows extreme deviation for Europe. Because of the few amount of points corresponding to the higher fitted values (ie. due to the strong skew), it is a bit difficult to assess the residual plot, however, it does not seem to be of immediate concern if we ignore these extreme values.
+
+\small
+```{r}
+AIC(mod_int_slope)-2*sum(log(1/(sdg$infant_mortality_rate))) # to glm
+AIC(mod_inter)-2*sum(log(1/(sdg$infant_mortality_rate))) # to glm
+AIC(mod_glm_inter)
+```
+\normalsize
+
+The AIC of the log-linked Gamma GLMM is -100.4586 whereas the AIC for the log transformed model is 369.502. Using this, along with the discussed improvements in the diagnostic plots, it seemed sensible to choose the GLMM for use in interpretation.
+
+```{r}
+plot(allEffects(mod_glm_inter))
+
+#we dont have population values...confounding as a greater population = more births = greater imr....adds complexity to income class divisions as some regions only have one income class...in fact most countries (all except senegal) only have one income class....possible that countries with high income class is higher in population and hence, has a greater imr
+
+```
+
+When examining the effect plots, we can see that time and life expectancy both have a negative relationship with infant mortality rate. On the other hand, the predicted relationship between income class and infant mortality rate is particularly interesting as it implies that higher income class regions are estimated to have higher infant mortality rates when compared to regions with the other income classes. This goes against the regular intuition that higher income classes would have lower infant mortality rates. One possible reason why this relationship may have been predicted in this way is due to confounding. More specifically, the data lacks information regarding population size. Presumably, regions with increased population size would have more births and hence, an increased infant mortality rate (due to increased probability of occurrence). Likewise, as we saw before, some regions only have one income class and the proportion of high income class was higher than the other income classes. Hence, it is possible that these regions with high income class are greater in population size, hence resulting in increased infant mortality rate.
+
+Considering this discrepancy in the predictions, as well as the possibility of outliers in the data, I decided to conduct a test for outliers by deriving the Cook's distance. This was done using `HLMdiag` library and hlm_influence() function which takes `lmer` objects to derive influence diagnostics.
+
+```{r}
+# from https://cran.r-project.org/web/packages/HLMdiag/vignettes/influence_diagnostics.html
+
+infl.countries <- hlm_influence(mod_inter, level = "country")
+```
+
+```{r,eval=FALSE}
+dotplot_diag(infl.countries$cooksd, name = "cooks.distance", cutoff = "internal")
+
+```
+\small
+```{r}
+tb2 <- infl.countries %>%
+  arrange(desc(cooksd)) %>% head(7)
+
+tb2
+```
+\normalsize
+
+From the plot above (*), we can see that 6 countries exceed the threshold value as indicated by the red line. Using the corresponding dataframe containing the influence data, I arranged the Cook's distance values so as to show the countries with the highest values first as these would correspond to the outliers. Argentina, Paraguay, Singapore, Lithuania, Hungary and Bulgaria all have Cook's distance values of more than 0.05 and so, we remove them from the original dataframe and refit the GLMM model. 
+
+```{r}
+outliers <- c("Argentina","Paraguay","Singapore","Lithuania","Hungary","Bulgaria")
+sdg_refit <- sdg[!(sdg$country %in% outliers), ]
+
+```
+
+```{r}
+mod_glm_refit <- 
+  glmer((infant_mortality_rate) ~ income_class +(1+ yearc|country) + yearc +  poly(life_expectancy,3) + (1|continent) + (1|income_class:region),
+        data = sdg_refit, 
+        family = Gamma(link = "log"))
+
+```
+
+```{r}
+diagnostics_glm_refit <-
+  data.frame(residuals   = residuals(mod_glm_refit),
+             fitted_vals = fitted(mod_glm_refit),
+             country     = sdg_refit$country)  
+```
+
+```{r}
+resid2_fit_refit <- diagnostics_glm_refit %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  geom_smooth() +
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 2 (GLMM) Refitted Without Outliers")
+```
+
+```{r}
+ordered_country<-sdg_refit$country[order(diagnostics_glm_refit$residuals)]
+
+resid2_refit <-diagnostics_glm_refit %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+ 
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 2 (Residuals)")
+```
+
+```{r}
+ranefs<-ranef(mod_glm_refit)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid2_slope_refit <-ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid2_int_refit <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+ranefs_region<-ranef(mod_glm_refit)$`income_class:region` %>% as_tibble(rownames = "income_class:region") 
+ordered_region<-ranefs_region$`income_class:region`[order(ranefs_region$`(Intercept)`)]
+
+resid2_region_refit<-ranefs_region %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_region,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "IncomeClass:Region (random effects)")
+```
+
+```{r}
+ranefs_continent<-ranef(mod_glm_refit)$continent %>% as_tibble(rownames = "continent") 
+ordered_continent<-ranefs_continent$continent[order(ranefs_continent$`(Intercept)`)]
+
+resid2_cont_refit <-ranefs_continent %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_continent,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "sample",
+           title = "Continent (random effects)")
+```
+
+```{r}
+grid.arrange(resid2_fit_refit,resid2_refit,resid2_slope_refit,resid2_int_refit,resid2_region_refit,resid2_cont_refit,ncol=3)
+```
+
+From diagnostic plots for the refitted model, we can see that the overall qqplot shows improvement when compared to the previous GLMM as deviations only really exist at the tails. The polynomial-like pattern previously observed in the `incomeclass:region` qqplot is less prominent and Europe is no longer as extremely deviated in terms of the continent qqplot.
+\small
+```{r}
+AIC(mod_glm_refit)
+```
+\normalsize
+
+With an AIC of -118.0778, we can now conclude that the refitted GLMM improves upon the previously discussed models. This is further confirmed by overlaying the actual data with the fitted model predictions as seen below:
+
+```{r}
+pred_plot <- sdg_refit %>% 
+  add_predictions(mod_glm_refit) %>% 
+    ggplot(aes(x     = yearc, 
+               y     = exp(pred), 
+               group = country)) + 
+      geom_line(alpha = 0.5, col = "black") +
+  scale_y_continuous(trans = "log") +
+        geom_line(aes(x = yearc,
+                       y = (infant_mortality_rate),
+                        group = country,
+                      col = continent), 
+                   alpha = 0.2) + coord_trans(y = scales::exp_trans(exp(1))) +
+ # facet_wrap(~continent)+
+          ylab("(infant_mortality_rate)")
+```
+
+\small
+```{r}
+summary(mod_glm_refit)$coefficients
+
+```
+\normalsize
+This model also gives us more sensible estimates:
+
+* Average infant mortality rates were approximately 100 x (exp(-0.01795766)-1) = 1.8% less for each year passed (between 2013 and 2017)
+* Around log(2)/-0.01795766 = 39 years ago, average infant mortality rates would have been doubled
+* For two regions within the same year and with the same life expectancy,if one of those regions is made up of persons with high class income, then we expect to see an average increase of exp(0.65082480)-1 = 0.917 infant mortality rate units of the other region if it is made up of persons with low class income; if the other region is made up of persons with lower middle class income then we expect to see an average increase of exp(0.65281099)-1 = 0.921 infant mortality rate units and if it is a upper middle class income region then we expect to see an average increase of exp(0.61776070)-1 = 0.855 infant mortality rate units.
+
+This can be easier visualised by the plots below:
+
+```{r}
+pred_plot
+plot(allEffects(mod_glm_refit))
+
+# time does not have a significant effect on imr but rather the other factors do
+```
+
+
+
+
+
+# An Analysis of Coffee Production Over Time
+
+In this dataset, there are two sources of variability which may result in differences in coffee production: variability due to the type of coffee and variability due to country. The data is also longitudinal as the entries are recorded over time from 1990 to 2018. Here, we aim to quantify the trend of coffee production over time, by also explaining differences between countries and coffee type.
+
+```{r}
+coffee_production <- read_csv("https://people.bath.ac.uk/kai21/MA50258/data/coffee.csv")
+
+```
+
+```{r}
+coffee <- melt(coffee_production, id.vars=c("country", "arabica_robusta"))
+
+names(coffee)[3] <- "year"
+names(coffee)[4] <- "coffee_prod"
+
+
+```
+
+```{r,eval=FALSE}
+coffee_mean <- coffee_production %>% 
+    adorn_totals(name = "mean") %>%
+    mutate(across(where(is.numeric), 
+          ~ replace(., n(), .[n()]/(n()-1)))) %>%
+    as_tibble
+
+
+ave <- t(coffee_mean[60,][, !names(coffee_mean) %in% c("country", "arabica_robusta")])
+time <- 1990:2018
+plot(time,ave)
+```
+```{r}
+
+#mean(as.numeric(as.character(coffee$year)))
+
+coffee$coffee_prod[coffee$coffee_prod==0]<- NA   #setting zeroes to NA
+
+coffee <- coffee %>% na.omit() %>%
+  mutate(year = as.integer(as.character(year)),
+         arabica_robusta = factor(arabica_robusta),
+         country = factor(country),
+         coffee_prod = as.numeric(coffee_prod),
+         yearc = year - 2004)
+
+coffee$arabica_robusta <- revalue(coffee$arabica_robusta, c("(R/A)"="(A/R)"))
+
+coffee$a_and_r <- dplyr::recode(coffee$arabica_robusta, "(A/R)" = 'Y', "(A)" = 'N', "(R)" = 'N')
+coffee$a <- dplyr::recode(coffee$arabica_robusta, "(A/R)" = 'N', "(A)" = 'Y', "(R)" = 'N')
+coffee$r <- dplyr::recode(coffee$arabica_robusta, "(A/R)" = 'N', "(A)" = 'N', "(R)" = 'Y')
+
+
+
+#as_tibble(coffee)
+
+#center at 2004
+# coffee prod given as thousands (60kg bags)
+```
+
+The initial dataframe was melted to make subsequent analysis easier; missing values were omitted and the `arabica_robusta` variable was adjusted so that there were three combinations, (A/R), (A) and (R), corresponding to the two types of coffee. This was done because there were entries initially corresponding to '(A/R)' and '(R/A)' rather than just one factor, this of which would make more sense since they represent the same combination.
+
+Plotting a barplot of the frequency of the respective coffee production values, there is a strong positive skew of 5.547558 as seen below (*). Hence, we should anticipate having to either fit a Gamma generalised linear model or a transformed linear model in order to best model the data.
+
+```{r, eval=FALSE}
+
+barplot(tabulate(coffee$coffee_prod, nbins = 80))
+skewness(coffee$coffee_prod, na.rm = TRUE) # positively skewed
+
+```
+
+```{r}
+coffee <-
+  coffee %>%
+    mutate(combo_num=ifelse(a_and_r=="Y",1,0),
+           a_num=ifelse(a=="Y",1,0),
+           r_num=ifelse(r=="Y",1,0))
+
+# difference in prop of coffee type (both vs one type)
+```
+
+By creating binary factors corresponding to whether a country used arabica, robusta or a combination of both, I then plotted graphs to visualise the relative usage (proportion) of these coffee types over time.
+
+```{r}
+
+#detach("package:plyr", unload = TRUE)
+
+ combo_plot <- coffee %>% 
+  group_by(year) %>% 
+  summarise(proportion = mean(combo_num))%>% 
+  ggplot(aes(year,proportion)) +   
+              geom_point()+
+              geom_smooth() + ylab("proportion (A/R)")
+ 
+ a_plot <- coffee %>% 
+  group_by(year) %>% 
+  summarise(proportion = mean(a_num))%>% 
+  ggplot(aes(year,proportion)) +   
+              geom_point()+
+              geom_smooth() + ylab("proportion (A)")
+ 
+ r_plot <- coffee %>% 
+  group_by(year) %>% 
+  summarise(proportion = mean(r_num))%>% 
+  ggplot(aes(year,proportion)) +   
+              geom_point()+
+              geom_smooth() + ylab("proportion (R)")
+
+```
+
+```{r}
+type_plot <- coffee %>% ggplot(aes(year, coffee_prod, group = country, col = arabica_robusta)) + geom_line() +geom_smooth(method = "lm", aes(color = NULL, group = NULL), 
+              color = "grey60", size = 1, linetype = "21",
+              se = FALSE, show.legend = FALSE) + 
+  annotate(geom = "label", label = "Global Trend", x = 2013, y = 13,
+           size = 2.5, color = "grey60")
+```
+
+```{r}
+grid.arrange(combo_plot,a_plot,r_plot,type_plot,ncol=2)
+```
+
+From the plot above, we can see that combination of arabica and robusta usage generally decreased from 1990 till around 2012, after which there is some increase. Arabica usage generally increases throughout the entire recorded period whereas robusta remains fairly constant despite the sudden decrease in 2018. Considering the fact that arabica and combination usage both see a drastic increase in 2018, this may account for this sudden decrease for robusta usage. When considering the relative proportion, arabica is used the most whereas robusta is used the least. It is hard to deduce the overall trend from the bottom right plot, however at a higher level, there appears to be an increasing trend for the visible lines; notably, these lines also correspond to combination usage.
+
+
+```{r}
+type_prod <- coffee %>% 
+     ggplot(aes(x = arabica_robusta,
+                y = coffee_prod,
+                col=arabica_robusta)) +
+     geom_point() +
+  geom_line(aes(col = arabica_robusta,
+                     group=arabica_robusta),
+                 stat = "summary",
+                 fun = "mean")
+```
+
+```{r}
+
+coffee <-
+  coffee %>% 
+    mutate(country = fct_reorder(.f   = country,
+                                 .x   = coffee_prod,
+                                 .fun = mean))
+country_plot <- coffee %>% 
+     ggplot(aes(y = country,
+                x = coffee_prod,
+                col="Raw data")) +
+     geom_point() +
+     geom_point(aes(col= "Country Mean"),
+                stat = "summary", 
+                fun = "mean", 
+                size = 3) +
+     labs(col = "Type")
+
+#brazil alot of intracountry variability as well as variablity wrt other countries
+```
+
+```{r,eval=FALSE}
+mod_mean_coffee <- lm(coffee_prod ~  arabica_robusta - 1,
+            coffee) 
+tidy(mod_mean_coffee)[,1:2] %>% kable()
+```
+
+```{r,eval=FALSE}
+mod_mean_coun <- lm(coffee_prod ~  country - 1,
+            coffee) 
+
+
+means_max <- sort(coef(mod_mean_coun), decreasing=TRUE)%>% tidy() 
+means_min <- sort(coef(mod_mean_coun), decreasing=FALSE)%>% tidy() 
+means_max[1:3,]
+means_min[1:3,]
+```
+
+```{r}
+type_prod
+country_plot
+```
+
+Further expanding on this, from the first plot above we can see that combination usage resulted in more coffee production with a total annual average of 5851 thousand 60kg bags, followed by arabica only usage (1540 thousand 60kg bags) and lastly robusta only usage (295 thousand 60kg bags) for the 28 year period. From the second plot, Brazil has the highest total annual average of 40636 thousand 60kg bags whereas Nepal has the lowest with only 1.5 thousand 60kg bags, for the same period. Notably, there is a substantial amount of variability in coffee production within Brazil itself.
+
+Considering this variability between countries, it seemed sensible to include `country` as a random effect. This was supported as under the initial random intercept model (log transformed), there was a country-to-country variability of 2.48281; since this value is more than zero, this inclusion is supported. Under the corresponding null model (log transformed), the fixed effects are estimated at 5.70480835 versus 5.45965491 under the initial random intercept model (log transformed), hence implying that the data is imbalanced; in other words, some countries have more data points than others.
+
+```{r,eval=FALSE}
+fmla_null_0 <- (log(coffee_prod) ~ 1 + yearc)
+mod_null_0  <- lm(fmla_null_0, 
+                 coffee)
+
+summary(mod_null_0)$coefficients[1,1:3] 
+sigma(mod_null_0)
+# fixed effects differ.....imbalanced data...log imr....#1
+```
+
+```{r}
+
+
+fmla_int <- log(coffee_prod) ~  1+(1|country) + yearc
+
+mod_int  <- lmer(fmla_int, 
+                 coffee)
+
+mod_int_ML <- lmer(fmla_int, coffee, REML = FALSE)
+```
+
+```{r,eval=FALSE}
+summary(mod_int)$coefficients 
+VarCorr(mod_int)#...estimate not equal to zero hence country to country variability is sufficient to incorporate random effects into model
+# fixed estimates different under mixed model vs null model
+
+```
+
+```{r}
+fmla_int_slo <- log(coffee_prod) ~ yearc + (1 + yearc|country) #3
+mod_int_slope <- lmer(fmla_int_slo, 
+              coffee)
+mod_int_slope_ML <- lmer(fmla_int_slo, coffee, REML = FALSE)
+```
+\small
+```{r}
+anova(mod_int_slope_ML,mod_int_ML) #slope + re model better
+```
+\normalsize
+
+From the above output, we can see that the p-value corresponding to random intercept + slope model is significantly less than 0.05, hence inferring that this model improves upon the initial random intercept model. This is also supported by the prediction plot below which visually shows an improved fit to the data (*). 
+
+```{r,eval=FALSE}
+coffee %>% 
+  add_predictions(mod_int_slope) %>% 
+    ggplot(aes(x     = yearc, 
+               y     = exp(pred), 
+               group = country)) + 
+      geom_line(alpha = 0.5, col = "black") +
+        geom_line(aes(x = yearc,
+                       y = (coffee_prod),
+                        group = country), 
+                   alpha = 0.2) +
+          ylab("(infant_mortality_rate)")
+```
+
+```{r}
+rand_eff_int_slo <- 
+  ranef(mod_int_slope)$country %>% 
+   as_tibble(rownames = "country")
+```
+
+
+```{r}
+
+coffee_by_country <- coffee %>% 
+                    group_by(country) %>% 
+                      nest()
+country_model <- function(df){
+  lm(log(coffee_prod) ~ yearc, data = df)
+}
+coffee_by_country <- coffee_by_country %>% 
+                      mutate(model = map(data, country_model))
+coffee_by_country <- coffee_by_country %>% 
+                      mutate(coefs     =  map(model,coefficients),
+                             intercept =  map_dbl(coefs,"(Intercept)"),
+                             slope     =  map_dbl(coefs,"yearc"))
+
+coffee_by_country <- coffee_by_country %>% 
+  na.omit()
+coffee_by_country <- coffee_by_country %>% 
+  mutate(interceptc = (intercept) - mean(coffee_by_country$intercept),
+           slopec = (slope) - mean(coffee_by_country$slope)) 
+
+rand_eff_int_slo %>% 
+  ggplot(aes(x = `(Intercept)`,
+             y = yearc,
+             label=country)) +
+    geom_point(aes(col="Random"),
+               alpha=0.5) +
+      geom_text(size=3, 
+                nudge_y = -0.0025) +
+        labs(x   = "Intercept", 
+             y   = "Slope",
+             col = "Effect") +
+          geom_point(data= coffee_by_country,
+                     aes(x = interceptc,
+                         y = slopec,
+                         col = "Fixed"),
+                     alpha=0.4)
+
+#inconsistent shrinkage...random effects are not normally distributed
+```
+
+With this data there also appears to be some inconsistency with shrinkage as some random effect points appear to be closer to (0,0) whereas others do not. It is probable that this can also be explained using the same reasoning as hypothesised with the SDG dataset. From the plot, we can also infer that countries to the top of the plot, such as Timor-Leste and Vietnam, have the quickest growing total annual coffee production whereas those to the bottom, such as Zimbabwe and Malawi, have the quickest decreasing total annual coffee production.
+
+```{r}
+diagnostics0 <-
+  data.frame(residuals   = residuals(mod_int_slope),
+             fitted_vals = fitted(mod_int_slope),
+             country     = coffee$country)  
+```
+
+```{r}
+resid0_fit <-diagnostics0 %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() + geom_smooth() +
+      geom_hline(yintercept = 0,
+                 col="red") +  
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 0")
+```
+
+```{r}
+ordered_country<-coffee$country[order(diagnostics0$residuals)]
+
+resid0<- diagnostics0 %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 0 (Residuals)")
+```
+
+
+```{r}
+ranefs<-ranef(mod_int_slope)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid0_slope <- ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid0_int <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r,eval=FALSE}
+grid.arrange(resid0_fit,resid0,resid0_slope,resid0_int,ncol=2)
+```
+
+Considering, the substantial differences between coffee type in terms of coffee production/yield, this of which may be systematic, we now incorporate the `arabica_robusta` term into our model. In particular, I tried this term as a fixed effect alone, as an interaction term with `yearc` and lastly as a composite random effects term with `country`.
+
+\small
+```{r}
+
+fmla_type <- log(coffee_prod) ~ yearc + arabica_robusta + (1 + yearc|country)  #3
+mod_type <- lmer(fmla_type, 
+              coffee)
+mod_type_ML <- lmer(mod_type, coffee, REML = FALSE)
+
+fmla_type_inter <- log(coffee_prod) ~ yearc*arabica_robusta + (1+yearc|country) #3
+mod_type_inter <- lmer(fmla_type_inter, 
+              coffee)
+mod_type_inter_ML <- lmer(mod_type_inter, coffee, REML = FALSE)
+
+fmla_re_inter <- log(coffee_prod) ~ yearc + arabica_robusta + (1 + yearc|country) + (1|arabica_robusta:country) #3
+mod_re_inter <- lmer(fmla_re_inter, 
+              coffee)
+mod_re_inter_ML <- lmer(mod_re_inter, coffee, REML = FALSE)
+
+
+
+anova(mod_int_slope_ML,mod_type_ML,mod_type_inter_ML,mod_re_inter_ML) # include continent and region random effects term
+
+#Random effects model country-to-country variability
+
+#There might be coffee type significant differences between countries
+
+#There might be a distinction between arabica_robusta varies between countries
+```
+\normalsize
+
+The ANOVA output tells us to retain `arabica_robusta` as a fixed effect over the other tested terms.
+
+```{r}
+diagnostics_type <-
+  data.frame(residuals   = residuals(mod_type),
+             fitted_vals = fitted(mod_type),
+             country     = coffee$country)  # country is used for labelling points in plots!
+```
+
+```{r}
+resid1_fit <- diagnostics_type %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 1") 
+
+```
+```{r}
+ordered_country<-coffee$country[order(diagnostics_type$residuals)]
+
+resid1 <- diagnostics_type %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 1 (Residuals)")
+```
+```{r}
+ranefs<-ranef(mod_type)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid1_slope <-ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid1_int <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+grid.arrange(resid1_fit,resid1,resid1_slope,resid1_int,ncol=2)
+```
+
+From the diagnostic plots above, we can see that the normality assumption is in doubt due to the deviations in the tails of the overall qqplot. The residual plot demonstrates an interesting pattern to the left, such that there are a few parallel/diagonal arrangements. This is most probably due to the reported values for those countries being very close to zero. In fact, upon closer inspection, some of these points correspond to Nepal which had the lowest coffee production.
+
+Recalling the strong positive skew in the data, I then implemented a Gamma log-linked GLMM in an attempt to improve the model even further.
+
+```{r}
+mod_glm_gamma <- 
+  glmer((coffee_prod) ~ yearc + (1 + yearc|country) + arabica_robusta, 
+        data = coffee,
+        family = Gamma(link = "log")) 
+
+```
+
+```{r}
+diagnostics_glm <-
+  data.frame(residuals   = residuals(mod_glm_gamma),
+             fitted_vals = fitted(mod_glm_gamma),
+             country     = coffee$country) 
+```
+
+```{r}
+resid2_fit<-diagnostics_glm %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 2 (GLMM)") 
+
+
+```
+
+```{r}
+ordered_country<-coffee$country[order(diagnostics_glm$residuals)]
+
+resid2<-diagnostics_glm %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 2 (Residuals)")
+```
+
+```{r}
+ranefs<-ranef(mod_glm_gamma)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid2_slope<-ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid2_int <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+grid.arrange(resid2_fit,resid2,resid2_slope,resid2_int,ncol=2)
+```
+```{r,eval=FALSE}
+coffee %>% 
+     add_predictions(mod_glm_gamma) %>% 
+     ggplot(aes(x = yearc, 
+                y = exp(pred), 
+                group = country)) + 
+     geom_line(alpha=0.2,
+               col="blue") +
+     geom_line(aes(x = yearc,
+                   y = (coffee_prod), 
+                   group = country), 
+               alpha=0.2)
+```
+
+From the diagnostic plots above, there is still doubt regarding the normality assumptions. In particular, the residual plot is extremely deviated to the left of the plot, with a few values being found at the upper most range of the fitted values. However, when comparing the AIC values, the GLMM has a lower AIC and thus, improves upon the previous model. 
+
+Considering the severe skew of the data, I decided to implement a transformation using the `transformTukey` function. From this (*), we get a lambda of 0.05; since this value is greater than 0, the corresponding transformation is recommended to be x ^ lambda where x is the response. 
+
+```{r,eval=FALSE}
+T_tuk_1 =
+     transformTukey(coffee$coffee_prod,
+                    plotit=FALSE)
+```
+```{r}
+
+trans_coffee = (coffee$coffee_prod) ^ 0.05
+backtrans_imr = (trans_coffee)^(1/0.05)
+
+```
+\small
+```{r}
+mod_trans_coffee <- lmer(trans_coffee~  yearc + arabica_robusta + (1 + yearc|country),
+                  data = coffee)
+
+AIC(mod_glm_gamma)
+AIC(mod_trans_coffee)-2*sum(log(0.05/(coffee$coffee_prod)^0.95))
+AIC(mod_type)-2*sum(log(1/(coffee$coffee_prod)))
+```
+\normalsize
+
+From the AIC values, we can see that the Tukey transformed model fits the data better than the corresponding log transformed model but still does not improve upon the GLMM.
+
+Considering the GLMM diagnostics, I thought it would be sensible to conduct a test for outliers by deriving the Cook's distance. 
+
+
+```{r}
+infl.countries <- hlm_influence(mod_trans_coffee, level = "country")
+```
+
+```{r,eval=FALSE}
+dotplot_diag(infl.countries$cooksd, name = "cooks.distance", cutoff = "internal")
+
+```
+\small
+```{r}
+tb2 <- infl.countries %>%
+  arrange(desc(cooksd)) %>% head(3)
+
+tb2
+```
+\normalsize
+
+From the plot above (*), we can see that 2 countries exceed the threshold value as indicated by the red line. Using the corresponding dataframe containing the influence data, I arranged the Cook's distance values so as to show the countries with the highest values first as these would correspond to the outliers. Côte d'Ivoire and Nepal all have Cook's distance values of more than 0.08 and so, we remove them from the original dataframe and refit both the GLMM and Tukey transformed models. 
+
+```{r}
+coffee_refit <- coffee[coffee$country != "Côte d'Ivoire" & coffee$country != "Nepal", ] 
+
+```
+
+```{r,eval=FALSE}
+T_tuk_2 =
+     transformTukey(coffee_refit$coffee_prod,
+                    plotit=FALSE)
+```
+
+```{r}
+trans_coffee_refit = (coffee_refit$coffee_prod) ^ 0.05
+backtrans_refit = (trans_coffee)^(1/0.05)
+```
+
+```{r}
+mod_trans_coffee_refit <- lmer(trans_coffee_refit~  yearc + arabica_robusta + (1 + yearc|country),
+                  data = coffee_refit)
+```
+
+```{r}
+mod_glm_gamma_refit <- 
+  glmer((coffee_prod) ~ yearc + (1 + yearc|country) + arabica_robusta, 
+        data = coffee_refit,
+        family = Gamma(link = "log")) 
+```
+\small
+```{r}
+AIC(mod_trans_coffee_refit)-2*sum(log(0.05/(coffee_refit$coffee_prod)^0.95))
+AIC(mod_glm_gamma_refit)
+```
+\normalsize
+
+After refitting the respective models to the adjusted data, we can see that the AIC values corresponding to each of respective models have decreased; the GLMM still has the lower AIC so we retain it as our final model.
+
+```{r}
+diagnostics_refit <-
+  data.frame(residuals   = residuals(mod_glm_gamma_refit),
+             fitted_vals = fitted(mod_glm_gamma_refit),
+             country     = coffee_refit$country)  
+```
+
+```{r}
+resid2_fit_refit <- diagnostics_refit %>% 
+  ggplot(aes(x = fitted_vals,
+             y = residuals,
+             label= country))+
+    geom_point() +
+      geom_hline(yintercept = 0,
+                 col="red") +  
+    geom_text(size=3, 
+                nudge_y = -0.0015,
+              check_overlap = TRUE) +
+      labs(title = "Model 2 (GLMM) Refitted Without Outliers") 
+
+```
+
+```{r}
+ordered_country<-coffee_refit$country[order(diagnostics_refit$residuals)]
+
+resid_refit <-diagnostics_refit %>%
+  ggplot(aes(sample = residuals))+ 
+    stat_qq() + 
+      stat_qq_line()+
+        geom_text(label=ordered_country,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "residuals",
+           title = "Model 2 (Residuals)")
+```
+
+```{r}
+ranefs<-ranef(mod_trans_coffee_refit)$country %>% as_tibble(rownames = "country") 
+ordered_yearc<-ranefs$country[order(ranefs$yearc)]
+ordered_intercept<-ranefs$country[order(ranefs$`(Intercept)`)]
+
+resid2_slope_refit <-ranefs %>% 
+ ggplot(aes(sample = yearc))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_yearc,
+                  stat="qq",
+                  check_overlap = T) +
+      labs(y= "slopes",
+           title = "Random Effects (slopes)")
+```
+
+```{r}
+resid2_int_refit <-ranefs %>% 
+ ggplot(aes(sample = `(Intercept)`))+ 
+    stat_qq() + stat_qq_line() +
+        geom_text(label=ordered_intercept,
+                  stat="qq",
+                  check_overlap = T)+
+      labs(y= "intercepts",
+           title = "Random Effects (intercepts)")
+```
+
+```{r}
+grid.arrange(resid2_fit_refit,resid_refit,resid2_slope_refit,resid2_int_refit,ncol=2)
+```
+
+Visually, there is not a noticable difference in the diagnostic plots, however, it should be noted that the random effect plots (both for slopes and intercepts) now fall at a more 45 degree angle when compared to the previous model.
+
+\small
+```{r}
+summary(mod_glm_gamma_refit)$coefficients
+```
+\normalsize
+
+The estimates under the final model are as follows:
+
+* Total annual coffee production (in thousand 60kg bags) was approximately 100 x (exp(-0.009958371)-1) = 99% less for each year passed (between 1990 and 2018)
+* In the same year, if arabica coffee was used then we expect to see an average increase of exp(1.427126221)-1 = 3.2 thousand 60kg bags in total annual coffee production if a combination of arabica and robusta was used instead. 
+* In the same year, if arabica coffee was used then we expect to see an average decrease of exp(-2.997384295)-1 = 0.95 thousand 60kg bags in total annual coffee production if a combination of arabica and robusta was used instead. 
+
+This can be easier visualised by the plots below:
+
+* Note that there is a significant difference between coffee production with robusta type versus arabica as well as combination (as the respective pink bars do not overlap). From this, it may be sensible to think that countries using a combination of coffee types may be using more arabica type than robusta type. This also follows from the proportion plots which were first discussed in this section.
+
+```{r}
+final_pred <- coffee_refit %>% 
+     add_predictions(mod_glm_gamma_refit) %>% 
+     ggplot(aes(x = yearc, 
+                y = exp(pred), 
+                group = country,
+                col=arabica_robusta)) + 
+     geom_line(alpha=0.2,
+               col="black") +
+     geom_line(aes(x = yearc,
+                   y = (coffee_prod), 
+                   group = country), 
+               alpha=0.2) + ylab("(coffee_production)")
+```
+
+```{r}
+final_pred
+plot(allEffects(mod_glm_gamma_refit))
+```
+
+
+
+
