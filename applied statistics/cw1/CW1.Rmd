@@ -1,0 +1,737 @@
+---
+title: "Analysis of Suicide Rates in England"
+author: "Zoe Ganess"
+output:
+  pdf_document:
+    keep_tex: yes
+    number_sections: yes
+  word_document:
+    toc: yes
+  html_document:
+    number_sections: no
+    toc: yes
+    toc_float: yes
+    code_download: yes
+    code_folding: hide
+always_allow_html: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE, message = FALSE)
+```
+
+```{r libraries,echo= FALSE}
+# include your libraries here
+# use echo = FALSE if you do not want the Code button to appear 
+library(tidyverse)
+library(modelr)
+library(janitor)
+library(dplyr)
+library(broom)
+library(knitr)
+library(klippy)
+library(kableExtra)
+library(patchwork)
+library(effects)
+library(RColorBrewer)
+library(mgcv)
+library(moments)
+library(rcompanion)
+library(rstatix)
+library(ggeffects)
+library(car)
+library(gridExtra)
+library(gridGraphics)
+library(ggpubr)
+library(ggplot2)
+
+```
+
+
+<!--
+You can include non-coding comments using these delimiters. What is written inside these delimiters wont be knitted into the html document!
+
+Do not change the structure of the document, just fill in the sections as indicated 
+You can only change the headings indicated with [*]
+-->
+
+
+```{r data_reading,echo=FALSE,message=FALSE}
+
+suicides_data <- read_csv("https://people.bath.ac.uk/kai21/MA50258/data/CW1_data.csv") 
+
+```
+
+```{r effects}
+
+#glimpse(suicides_data)
+
+#summary(suicides_data)
+
+# it can be seen that 5 columns have multiple missing values
+# we omit these by running the code below
+
+suicides_complete <- suicides_data[complete.cases(suicides_data),]
+```
+
+# A. Questions
+## Introduction
+
+For this analysis, data from 326 local authorities in England with information about suicides, personal well-being, unemployment, income, deprivation and population was considered. This report aims to determine the relationship between these explanatory factors and suicides. The importance of this report is therefore reflected in the fact that studying these relationships will lead to a better understanding of what exactly influences an individual to undergo suicidal thoughts. With better knowledge of this, we can address those influential factors in an attempt to mitigate the occurrence of suicidal incidences in the general population.
+
+NB: where (*) appears, that plot/table/graph etc. was not included due to the page limit but is not central to the main analysis...refer to rmarkdown file for original output
+
+
+##  Q1. To what extent are personal well-being, unemployment, income and deprivation  associated with the number of suicides in England?
+
+![Fitted Curves for Respective Explanatory Variables Against Suicide Rate](/Users/zoe/Downloads/uni of bath msc/s2/applied stats/fig1.png)
+
+The overall trend of each factor is shown in figure 1. It can be observed that living score (deprivation) and unemployment rate have a positive relationship with suicide rate whereas median income and worthwhile (wellbeing) have a negative relationship with same. More specificially, increases in deprivation and unemployment and decreases in income and personal wellbeing result in more persons committing suicide. We also recognise the relationships each of these factors have with each other and how they affect suicide rates jointly. For example, deprivation intuitively should be related to high unemployment rates and specifically low income and the combination of these factors, in turn would have a negative effect on ones wellbeing, ultimately leaving room for suicidal thoughts.
+
+
+
+##  Q2. What are the regional differences in the number of suicides in England?
+
+```{r reg}
+
+region_data <- suicides_complete %>% 
+  group_by(region) %>%
+  summarise(mean_suicides = mean(suicides),
+            #max_suicides = max(suicides),
+            #min_suicides = min(suicides),
+            average_suicide_rate = ((sum(suicides)/sum(population))*1e5),
+            total_suicides = sum(suicides),
+            total_pop = sum(population))
+region_data %>%  kable(digits = 2,
+        caption = "Regional Suicides Summary Statistics",
+        align="c") %>%  
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+```
+Looking at the table above, we can infer that Yorkshire and The Humber, North East and East of England have the three highest suicide rates whereas London, South East and East Midlands have the three lowest. The average suicide rate among those living in the region of Yorkshire and The Humber was approximately 1.5 more than those living in London. Interestingly, the three regions with the highest suicide rates are situated in the North of the UK whereas the two lowest suicide rates originate from the South. We note that the difference is not particularly significant (as the pink intervals in the graphs below interlap) but in order to quantify the further quantify the effects we are investigating, we take the instance of high and low unemployment rates as a reference. If all regions were to have the same unemployment rate, the average suicide rate would be fairly similar across each region, as seen in the table (refer to figure 3). However, under a low unemployment rate of 2.0, we observe subtle changes in the suicide rates (most increases), but the relative shape of the graph is unchanged. A higher unemployment rate of 7.0 sees substantial changes with both the average suicide rate and relative shape of the graph. One interesting thing to note is that the regions who initially had the highest suicide rates are now among the lowest, inferring that other factors such as deprivation, especially in the case of regional concerns, also affect the average suicides rates.
+
+
+![Effect of Low Unemployment Rates on Regional Suicide Rates](/Users/zoe/Downloads/uni of bath msc/s2/applied stats/fig5.png) 
+
+![Effect of High Unemployment Rates on Regional Suicide Rates](/Users/zoe/Downloads/uni of bath msc/s2/applied stats/fig4.png)
+
+##  Q3. Are there any difference in suicides with regards to the North-South divide?
+
+
+Marginalising the regions even further into North and South proves that there is a somewhat significant difference overall. At low unemployment rates and living scores the north tends to have more suicides but the difference is debatable as the intervals just barely overlap. At higher unemployment rates both regions see similar suicide rates (approx 0.5 difference between suicide rate), implying that this has significant influence over suicide rates in both regions. Likewise, at higher levels of deprivation, there is approximately 1.0 difference in the suicide rates between both regions. Thus, overall there is a difference in suicides with regards to the North-South divide, mostly owing to differences in unemployment rates and deprivation; in other words, the North sees higher unemployment rates and more deprivation when compared to the South. When we consider the traditional notions surrounding the North-South divide in England, this conclusion supports aspects regarding the socioeconomic makeup of these regions. 
+
+![Effect of Unemployment and Deprivation on Regional Suicide Rates](/Users/zoe/Downloads/uni of bath msc/s2/applied stats/fig8.png)
+
+
+# B. Materials and Methods
+
+## Data
+
+```{r summary, results='hide'}
+
+std_dev <- apply(suicides_complete[,-c(1,3)], 2, sd)  # omitting first and third columns from summary as they are characters
+min_val <- apply(suicides_complete[,-c(1,3)], 2, min)
+max_val <- apply(suicides_complete[,-c(1,3)], 2, max)
+mean_val <- apply(suicides_complete[,-c(1,3)], 2, mean)
+total_val <- apply(suicides_complete[,-c(1,3)], 2, sum)
+
+
+data.frame(min=min_val, max=max_val, mean=mean_val,sd=std_dev, total = total_val) %>% 
+  kable(digits = 2,
+        caption = "Suicides Summary Statistics",
+        align="c") %>%  
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+# 4748 suicides recorded in 2018
+```
+
+After creating a dataframe without missing values, we first investigate the relationship between population size and the number of suicides. Intuitively, it is usually assumed that the number of suicides increases with growing population size and this is indeed observed in this case, as there is a strong linear relationship seen in the plot below (*). However, this creates an issue in terms of our analysis, as we are required to determine the association of the other four factors with suicides. More specifically, since a great amount of the suicides can be explained by the population size, we see the need to hold population constant (assume it to be a value of 1) so that it is not estimated by our model. We implement this by creating two offsets: one in terms of log(population/100,000) and just population/100,000; these will be particularly useful when having to try different models further on.
+
+```{r pop,eval=FALSE}
+pop_plot <- suicides_complete %>% 
+  group_by(region) %>%
+  ggplot(aes(x = population,y = suicides)) + geom_point() + geom_smooth(formula = y~x,method = lm) 
+plot(pop_plot)
+
+#region_plot <- pop_plot + facet_wrap(~region)
+
+```
+
+In order to visualise the data, we first plot a histogram of the frequency of the number of suicides, which demonstrates a strong positive skew as seen below (*). Hence, we should anticipate having to either fit a poisson generalised linear model or a transformed linear model in order to best model the data.
+
+```{r hist,eval=FALSE}
+plotNormalHistogram(suicides_complete$suicides)
+```
+
+In order to implement further analysis, categorical variables are generated in terms of low, medium and high, with regards to income, wellbeing, unemployment and deprivation. We employ visualisation of correlations between the numerical variables (*). We note the high correlation between population and suicides as we also explained earlier. None of our other variables seem to have a particularly high correlation with suicides, however, some variables, such as income and unemployment, seem to display moderate correlation between each other. We note this as they may be an indication of interaction taking place.
+
+```{r mutate}
+suicides_complete <- suicides_complete %>% 
+     mutate(income = cut_number(median_income,3)) %>% 
+     mutate(income = fct_recode(income,
+                                   .low = levels(income)[1], 
+                                   .medium = levels(income)[2], 
+                                   .high = levels(income)[3]))
+
+suicides_complete <- suicides_complete %>% 
+     mutate(deprivation = cut_number(living_score,3)) %>% 
+     mutate(deprivation = fct_recode(deprivation,
+                                   .low = levels(deprivation)[1], 
+                                   .medium = levels(deprivation)[2], 
+                                   .high = levels(deprivation)[3]))
+
+suicides_complete <- suicides_complete %>% 
+     mutate(wellbeing = cut_number(worthwhile,3)) %>% 
+     mutate(wellbeing = fct_recode(wellbeing,
+                                   .low = levels(wellbeing)[1], 
+                                   .medium = levels(wellbeing)[2], 
+                                   .high = levels(wellbeing)[3]))
+
+suicides_complete <- suicides_complete %>% 
+     mutate(unemployment = cut_number(unemployment_rate,3)) %>% 
+     mutate(unemployment = fct_recode(unemployment,
+                                   .low = levels(unemployment)[1], 
+                                   .medium = levels(unemployment)[2], 
+                                   .high = levels(unemployment)[3]))
+
+suicides_complete <- suicides_complete %>% mutate(suicide_rate = suicides/population*1e5, os = (population/1e5), log_os = log(population/1e5))
+```
+
+```{r new, fig.show='hide', results='hide'}
+kable(cor(suicides_complete[,-c(1,3,9,10,11,12)]),
+      digits=2) %>%  
+        kable_styling(bootstrap_options = "striped", full_width = F )
+pairs(suicides_complete[,-c(1,3,9,10,11,12,13,14,15)])
+
+
+```
+
+##   Q1. To what extent are personal well-being, unemployment, income and deprivation  associated with the number of suicides in England?
+
+My first thought was to construct a simple linear model using the required variables to be estimated and the non-log offset (as this is a non-transformed model). This model resulted in an R-squared value of 0.334, however the plot of the actual values vs fitted values proved to be very poor. In order to improve on this, I decided it might be best to plot each explanatory variable against suicides and use LOESS smoothing to better visualise their relationship. 
+
+```{r mod0}
+initial_model <- lm(suicides ~ unemployment_rate + worthwhile + median_income + living_score,  offset = os, data = suicides_complete)
+```
+
+```{r loess,eval=TRUE}
+
+ls_plot<-suicides_complete %>%
+  ggplot(aes(living_score, suicides)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 1, raw = T),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green")) +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+ur_plot<-suicides_complete %>%
+  ggplot(aes(unemployment_rate, suicides)) +
+  geom_point() + 
+  scale_x_continuous(trans = "log") +
+  geom_smooth(method = lm, formula = y ~ poly(x,1),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green"))+ xlab("unemployment_rate(log)") +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+mi_plot<-suicides_complete %>%
+  ggplot(aes(median_income, suicides)) +
+  geom_point() + 
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 1, raw = T),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green")) +
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+ww_plot<-suicides_complete %>%
+  ggplot(aes(worthwhile, suicides)) +
+  geom_point() + 
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 1, raw = T),
+              se = F, aes(col = "blue")) +
+  geom_smooth(se = T, aes(col = "red"), linetype ="dashed") +
+  geom_smooth(method = lm, formula = y ~ poly(x, degree = 2, raw = T),
+              se = F, aes(col = "green"))+
+  scale_color_identity(name = "Smooth Type", 
+                       breaks = c("blue", "red", "green"),
+                       labels = c("Linear", "LOESS","Quadratic"), guide = "legend")
+
+
+
+(ls_plot | ur_plot)/(ww_plot | mi_plot)
+```
+Figure 5: Smoothing
+
+Along with LOESS smoothing, I also included linear and quadratic smoothing for ease of analysis. Firstly, it should be noted that unemployment_rate was log-transformed as it allowed for better linear smoothing; while the linear line slightly overestimates for higher unemployment rates, it still follows the general linear trend well and so we will consider this transformed variable in our model. Living_score can be seen to appear fairly cubic but this may just be possible due to extreme values (or outliers). Instead, we consider the linear trend which follows the LOESS line fairly consistently, only slightly underestimating at lower living scores and overestimating even less at higher scores. Likewise for worthwhile, the linear line follows the LOESS line consistently and so we keep the linear term in our model. Lastly, we consider a quadratic transformation for median_score.
+
+```{r mod_1}
+
+mod_1 <- lm(suicides ~ log(unemployment_rate) + worthwhile + median_income + I(median_income^2) + living_score,  offset = os, data = suicides_complete)
+
+```
+Implementing the transformed explanatory terms only saw little improvement to the R-squared value to 0.340 and thus, not much change in the plot of the actual values vs fitted values. Because of this, I decided it would be best to work backwards with the current full model and use the AIC values as they are a better representation of model fit.
+
+```{r drop1, results='hide'}
+
+drop1(mod_1, test = 'F')
+
+```
+From the drop1 command (*), we can see that p-value for log(unemployment_rate) is greater than 0.05 and so we reject the null hypothesis of this term being insignificant in our model at the 95% confidence interval. Related to its significance is the fact that its deletion would cause the AIC of the current model to increase from 1345.5 to 1356.8. On the other hand, deletion of the quadratic median_income term variable offers the greatest minimisation in our AIC value to 1343.7. In order to further determine whether this decision is justified, we implement the stepwise AIC command. 
+
+```{r AIC}
+
+m.backward <- stats::step(mod_1, scope = c(lower=~log(unemployment_rate)), direction = "backward")
+
+```
+
+From the above output, it is suggested that we remove worthwhile and the quadratic median_income terms from the full model. In particular, it is highly plausible that the relationship between the worthwhile variable and suicides can be explained by other variables in the model, hence making this removal valid. In fact, additional removal of the quadratic median_income term would possibly imply that the aforementioned relationship could be explained by the linear median_income term. Indeed, when observing the smoothing plots, one can see that worthwhile and median_income appear very similar, and so, only one term, in this case median_income, may be needed in the model. However, when we implement this into a reduced model, we can a slight decrease in our R-squared value 0.337. Conversely, removing only the quadratic median_income term sees the R-squared remain constant at 0.340. Moreover, because of this somewhat negligible difference in the AIC of the model without the worthwhile term (1343.38) and with the worthwhile term (1343.74), I decided to keep the term in the model for ease of interpretation with regards to question 1.
+
+
+With regards to the residual plots (see Fig.?), we note the tendency for there to be increasing variation in the residuals as the fitted values increase. This phenomenon is known as heteroskedasticity and hence implies that we are dealing with a non-normal distribution due to a non-constant variance. This relates to the point made earlier using the histogram which revealed a strong positive skew in the data. To solve this problem, we can build our way up to implementing a non-normal distribution to ultimately model our data.
+
+Following this discovery, I decided to create a transformed linear model by transforming the response variable and using the reduced model. Here, we implement the log offset as we are using the log of the response.
+```{r mod2}
+
+mod_2 <- lm(log(suicides) ~ log(unemployment_rate) + median_income + living_score + worthwhile,  offset = log_os, data = suicides_complete)
+
+```
+
+The transformed linear model shows great improvement as the R-squared has increased significantly to a value of 0.762 so we continue with this model. Considering the correlation plots, we can investigate whether there is any interaction taking place between the explanatory variables. In particular, out of the entire dataset, the most correlation is seen between unemployment_rate and median_income then between unemployment_rate and worthwhile. Though the correlation is only moderate, it may be an indication of some interaction and so we plot their respective interaction plots below.
+
+```{r interaction}
+
+
+ur_income <- suicides_complete %>% 
+     ggplot(aes(x = unemployment_rate,
+                y = suicide_rate,color = income)) +
+     geom_point() + geom_smooth(formula = y ~ poly(x,1), method = lm, se=F) +
+  xlab("unemployment rate (log)")  + scale_x_continuous(trans = "log")
+
+ur_worth <- suicides_complete %>% 
+     ggplot(aes(x = unemployment_rate,
+                y = suicide_rate,color = wellbeing)) +
+     geom_point() + geom_smooth(formula = y ~ poly(x,1), method = lm, se=F) +
+  xlab("unemployment rate (log)")  + scale_x_continuous(trans = "log")
+
+ur_income | ur_worth
+
+```
+Figure 6: Interaction Plots
+
+With differing levels of income and wellbeing, we can see that the plotted lines cross at differing unemployment rates, thus implying that there is interaction taking place between the respective variables. But how significant is this interaction in terms of improving our model? Adding the interaction of log(unemployment_rate) and median_income sees a considerable improvement in our R-squared value to 0.792. On the other hand, the interaction of log(unemployment_rate) and worthwhile only sees less improvement in our R-squared value to 0.773. In order to further verify the significance of each interaction term, we conduct an ANOVA using the original transformed linear model and the models containing the added interaction terms below.
+
+```{r mod3}
+
+mod_3 <- lm(log(suicides) ~ log(unemployment_rate) + median_income + living_score + worthwhile + log(unemployment_rate)*median_income ,  offset = log_os, data = suicides_complete)
+
+mod_3a <- lm(log(suicides) ~ log(unemployment_rate) + median_income + living_score + worthwhile + log(unemployment_rate)*worthwhile ,  offset = log_os, data = suicides_complete)
+
+
+
+anova(mod_2,mod_3,test="LRT")
+anova(mod_2,mod_3a,test="LRT")
+
+```
+Both generated p-values for the models the respective interaction terms prove to be less than 0.05, meaning that we can reject the null hypothesis of these interaction terms being insignificant in our model at the 95% confidence interval. In particular, the p-value corresponding to the log(unemployment_rate) * median_income term is seen to be considerably smaller than the p-value for the log(unemployment_rate) * worthwhile term. Considering this, we can infer that the log(unemployment_rate) * median_income term has greater significance with regards to our model, and so we retain this term rather than the log(unemployment_rate) * worthwhile term. In my final search for an improved model, I decided to implement two generalised linear models below: one poisson with a log link and one gaussian with a log link. 
+
+```{r glms}
+
+mod_glm <- glm(suicides ~ log(unemployment_rate) + median_income + living_score + worthwhile + log(unemployment_rate)*median_income, data = suicides_complete, family = gaussian(link="log"), offset = log_os)
+
+
+mod_glm2 <- glm(suicides ~ log(unemployment_rate) + median_income + living_score + worthwhile + log(unemployment_rate)*median_income, data = suicides_complete, family = poisson(link="log"), offset = log_os)
+
+AIC(mod_glm,mod_glm2)
+
+```
+Fitting with these generalised linear models shows notable improvement to our R-squared value to 0.810 under the gaussian model and 0.806 under the poisson model. In order to determine which one to include in our final model, we consider the AIC of each model which is seen to be 1812.61	under the gaussian model and 1769.95 under the poisson model. The poisson model thus minimises the AIC considerably and so our final and best fitted model can be studied by the summary output below (*). This closely follows the point we made previously regarding the heteroskedasticity and thus non-constant variance of the data. In particular, we know that for a poisson distribution variance increases as mean increases and so the use of this distribution is clearly the best choice. Finally, note how the corresponding p-values for each term, except than worthwhile, is less than 0.05, implying that those terms is significant here. Again, we reiterate the decision to retain the worthwhile term is for ease of interpretation and we will discuss possible reasons why this term ends up being insignificant.
+
+```{r summary2, results='hide'}
+summary(mod_glm2)
+
+```
+
+
+```{r data}
+
+data_resid<- suicides_complete %>% gather_residuals(initial_model,mod_1,
+                                        .resid = "residuals")
+
+data_fv<- suicides_complete %>% gather_predictions(initial_model,mod_1,
+                                       .pred ="fitted_vals",
+                                       type = "response")
+
+data_models <- data_fv %>% left_join(data_resid)
+
+```
+
+```{r pls, eval=FALSE}
+
+lm_fitted_plots<-data_models %>% 
+    ggplot(aes(suicides, fitted_vals)) + 
+      geom_point() + geom_smooth()+
+        geom_abline(intercept = 0,
+                    slope = 1,
+                    col = "red") +facet_wrap(~model, nrow=2)
+ 
+
+lm_resid_plots <- data_models  %>%
+     ggplot(aes(fitted_vals, residuals)) + 
+     geom_point() +
+     geom_abline(intercept = 0, 
+                 slope = 0, 
+                 col = "red")  + 
+     geom_smooth() +facet_wrap(~model, nrow=2)
+
+lm_fitted_plots+lm_resid_plots
+
+```
+
+```{r log}
+glm_trans_models <- suicides_complete %>% 
+     spread_predictions(mod_2,mod_3,mod_3a,mod_glm,mod_glm2,
+                        type="response") %>% 
+     mutate(mod_2 = exp(mod_2),mod_3 = exp(mod_3),mod_3a = exp(mod_3a)) %>% 
+     pivot_longer(c("mod_2","mod_3","mod_3a","mod_glm","mod_glm2"),
+                  names_to = "model",
+                  values_to = "fitted_vals") %>% 
+     mutate(residuals = suicides - fitted_vals)
+
+glm_trans_fv<- glm_trans_models %>%
+    ggplot(aes(suicides, fitted_vals)) + 
+      geom_point() + 
+        geom_abline(intercept = 0,
+                    slope = 1,
+                    col = "red")+
+  geom_smooth() +facet_wrap(~model, nrow=2)
+         
+
+fit_vs_res_glm<-glm_trans_models %>%
+     ggplot(aes(fitted_vals, residuals)) + 
+     geom_point() +
+     geom_abline(intercept = 0, 
+                 slope = 0, 
+                 col = "red")  + 
+  geom_smooth() +
+      facet_wrap(~model, nrow=2)
+
+glm_trans_fv+fit_vs_res_glm
+```
+
+Figure 7: Actual vs Fitted (left) and Fitted vs Residuals (Right) for Transformed and GLM Models
+
+```{r r2, results='hide'}
+data_fv %>% 
+  group_by(model) %>% 
+    summarise(R2 = cor(suicides,fitted_vals)^2) %>% 
+      kable(digits=3) %>% 
+        kable_styling(full_width = FALSE)
+
+glm_trans_models %>% 
+  group_by(model) %>% 
+    summarise(R2 = cor(suicides,fitted_vals)^2) %>% 
+      kable(digits=3) %>% 
+        kable_styling(full_width = FALSE) 
+```
+
+With regards to the residual plots, note how the model building process up to the final poisson model slowly reduces the effect of heteroskedasticity. For easier visualisation we can refer to the Pearsons residuals corresponding to our final model as seen below and observe that the residuals are now evenly distributed about the zero reference line (*). When the fitted values exceed 75 there is overestimation of suicides, this of which is negligible as there is only one point above that range.
+
+```{r, fig.show='hide', results='hide' }
+persons_final <- residualPlot(mod_glm2, variable = "fitted", type = "pearson",
+              plot = TRUE, quadratic = FALSE, smooth=TRUE, main = "Pearson Residual Plot for Final Model")
+```
+
+
+```{r, eval=FALSE}
+
+final_pred <- suicides_complete %>% 
+  spread_predictions(mod_glm2,
+                     type="response") %>% 
+  pivot_longer(c("mod_glm2"),
+               names_to = "model",
+               values_to = "fitted_vals") %>% 
+  mutate(residuals = suicides - fitted_vals)
+
+
+living_fit <- suicides_complete%>%
+  ggplot(aes(x = living_score, y = suicides)) +
+  geom_point() +
+  geom_smooth(data = final_pred, aes(y=round(fitted_vals,0)), method = "glm", method.args = list(family = poisson(link="log")), se = TRUE)+ ylab("suicides per 100K")
+
+ur_fit <- suicides_complete%>%
+  ggplot(aes(x = unemployment_rate, y = suicides)) +
+  geom_point() +
+  geom_smooth(data = final_pred, aes(y=round(fitted_vals,0)), method = "glm", method.args = list(family = poisson(link="log")), se = TRUE)+ ylab("suicides per 100K")
+
+mi_fit <- suicides_complete%>%
+  ggplot(aes(x = median_income, y = suicides)) +
+  geom_point() +
+  geom_smooth(data = final_pred, aes(y=round(fitted_vals,0)), method = "glm", method.args = list(family = poisson(link="log")), se = TRUE)+ ylab("suicides per 100K")
+
+ww_fit <- suicides_complete%>%
+  ggplot(aes(x = worthwhile, y = suicides)) +
+  geom_point() +
+  geom_smooth(data = final_pred, aes(y=round(fitted_vals,0)), method = "glm", method.args = list(family = poisson(link="log")), se = TRUE) + ylab("suicides per 100K")
+
+
+
+(living_fit | ur_fit)/(mi_fit | ww_fit)
+
+```
+
+From figure 1 from section A we know that suicides increase with increasing levels of unemployment and deprivation and decrease with increasing income and wellbeing. Intuitively this makes sense, however, when looking at the effect plots below we see a different outcome than expected.
+
+```{r smooth}
+
+#pred_interaction<- ggpredict(mod_glm2, c("unemployment_rate", "median_income"))
+pred_ur <- plot(Effect("unemployment_rate",mod_glm2),ylab = "suicides per 100K")
+pred_living <- plot(Effect("living_score",mod_glm2),ylab = "suicides per 100K")
+pred_income <- plot(Effect("median_income",mod_glm2),ylab = "suicides per 100K")
+pred_worth <- plot(Effect("worthwhile",mod_glm2),ylab = "suicides per 100K")
+
+grid.arrange(pred_living, pred_worth, pred_ur, pred_income, ncol=2, nrow = 2)
+#plot(pred_interaction)
+
+#unemployment rate doesnt make sense...possible confounding due to correlated variable most likely median income so use worth model with interaction instead
+
+# living score also does not make sense....also affected by income so confounding
+
+```
+Figure 8: Effect Plots
+We see that suicide rates tend to decrease with increasing unemployment rates and deprivation while they increase with increasing wellbeing. This is completely opposite to what we saw in the fitted curves and goes against our intuition but we know that the effect plots allow for investigation of individual variable (marginal) effects while holding other explanatory variables constant. Therefore, the reason for this difference is most likely due to the presence of a confounding variable. As we previously mentioned, median_income and unemployment_rate are moderately correlated, possibly to the point where this increase in unemployment_rate seen in figure 1 is actually due to the presence of the variable in our model. In particular, we know that as the unemployment rate declines, persons feel less suicidal (positive relationship), however we also know that as a person's salary/income decreases, unemployment rate will increase and then they become more susceptible to suicidal thoughts. Closely related to this is the fact that less deprivation should result in less suicides, but less income as a result of less employment means an increase in deprivation, resulting in more suicidal thoughts. Likewise, increased personal wellbeing should result in less suicides, but more less as a result of less employment income means a decrease in wellbeing, resulting in more suicidal thoughts.We remove terms associated with this confounding variable and fit a revised final model as follows:
+
+```{r}
+mod_final <- glm(suicides ~ log(unemployment_rate) + worthwhile + living_score, data = suicides_complete, family = poisson(link="log"), offset = log_os)
+
+pred_ur2 <- plot(Effect("unemployment_rate",mod_final ),ylab = "suicides per 100K")
+pred_living2 <- plot(Effect("living_score",mod_final ),ylab = "suicides per 100K")
+pred_worth2 <- plot(Effect("worthwhile",mod_final ),ylab = "suicides per 100K")
+
+
+#grid.arrange(pred_living2, pred_worth2, pred_ur2, ncol=2, nrow = 2)
+```
+```{r}
+tidy(mod_final) %>% 
+  kable(digits = 5, 
+        caption = "Final Revised Model: Estimated Parameters with Log Link Poisson GLM")  %>%  
+          kable_classic(full_width = F)
+```
+The interpretation for the table above is as follows: for each extra unit that unemployment rate increases by, we expect to see a relative increase of about 10.5% (exp(0.09958)-1 $\approx$ 0.1047068) in the average number of suicides per 100K people. Likewise, the average number of suicides double for every log(2)/(0.09958) $\approx$ 6.96 unit increase in unemployment rate. From this we are told to expect a relative increase of about 26% in the average number of suicides per 100K people with every increase in worthwhile effects and a relative decrease of about 0.22% in the average number of suicides per 100K people with every increase in living_score; we know these inferences are misleading so we disregard them.
+
+This improves on the unemployment_rate effect but the living_score and worthwhile effects remain the same, possibly indicating that an underlying factor is responsible for such disparity. In particular, we know that living deprivation, personal wellbeing and unemployment usually go hand in hand, as well as the fact that deprivation is strongly influenced by environmental factors. Another way to think about it is that unemployed persons may not be able to afford to live in 'better' environments due to lack of income, this of which affects their wellbeing. With this in mind, we investigate the effects of regional differences in the following section in hopes of improving our model.
+
+
+##   Q2. What are the regional differences in the number of suicides in England?
+```{r, eval=FALSE}
+reg_int0 <- suicides_complete %>% 
+     ggplot(aes(x = unemployment_rate,
+                y = suicide_rate,color = region)) +
+     geom_point() + geom_smooth(formula = y ~ poly(x,1), method = lm, se=F) + scale_x_continuous(trans="log")
+reg_int1 <- suicides_complete %>% 
+     ggplot(aes(x = living_score,
+                y = suicide_rate,color = region)) +
+     geom_point() + geom_smooth(formula = y ~ poly(x,1), method = lm, se=F)
+grid.arrange(reg_int0,reg_int1,ncol=1)
+
+#interaction taking place
+```
+
+From the above plot (*), we can see that interaction is taking place between the different regions and so we implement this in our revised model below.
+Conducting an ANOVA confirms that the log(unemployment_rate) * region and living_score * region terms are significant (*).
+
+```{r region, results='hide'}
+
+mod_reg_0 <- glm(suicides ~ log(unemployment_rate) + living_score + worthwhile , data = suicides_complete, family = poisson(link="log"), offset = log_os)
+
+mod_reg_final <- glm(suicides ~ log(unemployment_rate)*region + worthwhile + region*living_score, data = suicides_complete, family = poisson(link="log"), offset = log_os)
+
+
+anova(mod_reg_0 ,mod_reg_final,test="LRT") # p value less than 0.05 > interaction significant
+
+```
+
+
+```{r effect1,fig.dim = c(8, 4),eval=TRUE}
+pred_ur3 <- plot(Effect("unemployment_rate",mod_reg_final ))
+pred_living3 <- plot(Effect("living_score",mod_reg_final ))
+pred_worth3 <- plot(Effect("worthwhile",mod_reg_final ))
+pred_ggur<- ggpredict(mod_reg_final, c("unemployment_rate"))
+pred_ggls<- ggpredict(mod_reg_final, c("living_score"))
+pred_ggww<- ggpredict(mod_reg_final, c("worthwhile"))
+
+par(mfrow = c(1, 2))
+#plot(pred_ggur)
+plot(pred_ggls) 
+plot(pred_ggww)
+```
+
+
+We now see a more sensible result for the marginal effect of living_score appears to be positive in relation to suicide counts. Conversely, we still see no improvement to the worthwhile plot. This may be due to the fact that the range provided for the sampled worthwhile values proves to be very small and thus is not able to confer any significant effects in this case.
+
+From the plot below we can see that a difference between the effect of different regions on suicide rate actually depends on the underlying assumed unemployment rates and living scores. However, note that this difference is not so significant as the intervals for each region overlap with each other.
+
+```{r effect,eval=TRUE,fig.dim = c(16, 8)}
+
+
+reg_plot_0 <- plot(Effect("region",
+                 mod_reg_final))
+
+reg_plot_1 <- plot(Effect("region",
+                 mod_reg_final ,
+                 fixed.predictors = list(given.values = c(`log(unemployment_rate)`=log(2)))), main = "unemployment_rate of 2",ylab = "suicides per 100K")
+reg_plot_2 <-  plot(Effect("region",
+                 mod_reg_final ,
+                 fixed.predictors = list(given.values = c(`log(unemployment_rate)`=log(7)))), main = "unemployment_rate of 7",ylab = "suicides per 100K")
+
+reg_plot_3 <- plot(Effect("region",
+                 mod_reg_final ,
+                 fixed.predictors = list(given.values = c(`living_score`=10))), main = "living_score of 10",ylab = "suicides per 100K")
+reg_plot_4 <-  plot(Effect("region",
+                 mod_reg_final ,
+                 fixed.predictors = list(given.values = c(`living_score`=40))), main = "living_score of 40",ylab = "suicides per 100K")
+
+
+
+
+reg_plot_0 
+#reg_plot_1 
+#reg_plot_2
+#reg_plot_3 
+#reg_plot_4
+
+
+#worthwhile and living_score insignificant...living_score influenced by income and income influenced by unemployment rate
+# to see effect of regions we have to vary the unemployment variable
+# unemployment seems to have more influence on suicides compared to living score (pink intervals)
+#no significant regional difference as intervals interlap
+
+```
+
+```{r, results='hide'}
+tidy(mod_reg_final) %>% 
+  kable(digits = 5, 
+        caption = "Region Model: Estimated Parameters with Log Link Poisson GLM")  %>%  
+          kable_classic(full_width = F)
+```
+
+## Q3. Are there any difference in suicides with regards to the North-South divide?
+
+In order to implement this analysis we must first create a new column in our existing/initial dataframe. To further catergorise the regions into North and South, I referred to this (https://geographical.co.uk/images/2020/North_South_divide/Map.png) map. For this question I opted to remove the worthwhile term from the model due to reasons discussed in the previous question. 
+```{r}
+set.seed(357)
+suicides_complete$N_or_S <- rep(NA, nrow(suicides_complete))
+suicides_complete[suicides_complete$region == "North East", ][, "N_or_S"] <- "North"
+suicides_complete[suicides_complete$region == "North West", ][, "N_or_S"] <- "North"
+suicides_complete[suicides_complete$region == "Yorkshire and The Humber", ][, "N_or_S"] <- "North"
+suicides_complete[suicides_complete$region == "East Midlands", ][, "N_or_S"] <- "North"
+suicides_complete[suicides_complete$region == "West Midlands", ][, "N_or_S"] <- "North"
+suicides_complete[suicides_complete$region == "East of England", ][, "N_or_S"] <- "South"
+suicides_complete[suicides_complete$region == "London", ][, "N_or_S"] <- "South"
+suicides_complete[suicides_complete$region == "South West", ][, "N_or_S"] <- "South"
+suicides_complete[suicides_complete$region == "South East", ][, "N_or_S"] <- "South"
+
+mod_N_S <- glm(suicides ~ N_or_S*log(unemployment_rate) + N_or_S*living_score , data = suicides_complete, family = poisson(link="log"), offset = log_os)
+
+```
+
+
+
+```{r}
+N_S_plot_0 <- plot(Effect("N_or_S",
+                 mod_N_S))
+
+
+N_S_plot_1 <- plot(Effect("N_or_S",
+                 mod_N_S ,
+                 fixed.predictors = list(given.values = c(`log(unemployment_rate)`=log(2)))), main = "unemployment_rate of 2",ylab = "suicides per 100K")
+N_S_plot_2 <-  plot(Effect("N_or_S",
+                 mod_N_S ,
+                 fixed.predictors = list(given.values = c(`log(unemployment_rate)`=log(7)))), main = "unemployment_rate of 7",ylab = "suicides per 100K")
+
+N_S_plot_3 <- plot(Effect("N_or_S",
+                 mod_N_S ,
+                 fixed.predictors = list(given.values = c(`living_score`=10))), main = "living_score of 10",ylab = "suicides per 100K")
+N_S_plot_4 <-  plot(Effect("N_or_S",
+                 mod_N_S ,
+                 fixed.predictors = list(given.values = c(`living_score`=40))), main = "living_score of 40",ylab = "suicides per 100K")
+
+
+
+N_S_plot_0
+#N_S_plot_1 
+#N_S_plot_2 
+#N_S_plot_3
+#N_S_plot_4 
+
+#grid.arrange(N_S_plot_1,N_S_plot_2,N_S_plot_3,N_S_plot_4,  ncol=2, nrow = 2)
+```
+
+
+```{r log2, eval=FALSE}
+
+region_models <- suicides_complete %>% 
+     spread_predictions(mod_reg_0,mod_reg_final,mod_N_S,
+                        type="response") %>% 
+     pivot_longer(c("mod_reg_0","mod_reg_final","mod_N_S"),
+                  names_to = "model",
+                  values_to = "fitted_vals") %>% 
+     mutate(residuals = suicides - fitted_vals)
+
+region_fv<- region_models %>%
+    ggplot(aes(suicides, fitted_vals)) + 
+      geom_point() + geom_smooth() +
+        geom_abline(intercept = 0,
+                    slope = 1,
+                    col = "red")  +
+           facet_wrap(~model)
+
+fit_vs_res_region<-region_models %>%
+     ggplot(aes(fitted_vals, residuals)) + 
+     geom_point() +
+     geom_abline(intercept = 0, 
+                 slope = 0, 
+                 col = "red")  + 
+     geom_smooth() +
+     facet_wrap(~ model, nrow = 2) + 
+     ggtitle("Fitted response values vs Residuals")
+
+region_models %>% 
+  group_by(model) %>% 
+    summarise(R2 = cor(suicides,fitted_vals)^2) %>% 
+      kable(digits=3) %>% 
+        kable_styling(full_width = FALSE)
+
+persons_final_reg <- residualPlot(mod_reg_final, variable = "fitted", type = "pearson",
+              plot = TRUE, quadratic = FALSE, smooth=TRUE, main = "Pearson Residual Plot for Final Region Model")
+
+region_fv
+fit_vs_res_region
+
+
+AIC(mod_reg_0,mod_reg_final,mod_N_S)
+```
+
+
+# References
+
+Include your references in this section. The references below are examples of books and a website.
+
+<!--
+Include your references in this section. The references below are examples of books and a website
+-->
+
+1.  Wickham, H. *ggplot2: Elegant Graphics for Data Analysis* [on-line version](https://ggplot2-book.org/index.html)
+
+
+2.  Wickham, H. & Grolemund, G. *R for Data Science.* [on-line version](https://r4ds.had.co.nz/index.html)
+
+3. [Department of Maths website](https://www.bath.ac.uk/departments/department-of-mathematical-sciences/)
