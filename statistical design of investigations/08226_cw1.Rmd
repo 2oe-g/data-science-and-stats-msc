@@ -1,0 +1,356 @@
+---
+title: "MA50259 - Coursework 1 Assignment"
+author: "Candidate Number: 08226"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part 1: Baking Powder Experiment
+
+### (a) What is the experimental unit and which type of experimental design is this?
+
+The experimental unit/units are biscuits since we are investigating the effect of differing amounts of baking powder (which serve as the treatments) on them. This is a completely randomised design (CRD) as we have one treatment factor with t = 4 levels, each acting on r = 4 replicate experimental units, therefore resulting in a total of n = 16 experimental units. 
+
+### (b) Read-in the data in R as a data.frame in such a way that it can be used by lm without any modification, that is, your data frame should have 1 variable and 16 rows. You may denote your response variable as y, the number of replicates as r and the number of levels of the factor as t. The variable should be called riseht. The data frame should be called biscuits
+
+```{r load, message=FALSE}
+
+library(tidyverse)
+library(Matrix)
+library(MASS)
+
+```
+
+
+```{r df, echo=TRUE, eval=TRUE}
+
+t <- 4
+r <- 4 
+n <- t*r
+
+levels <- c("0.25 tsp", "0.5 tsp", "0.75 tsp", "1 tsp");
+fac <- rep(levels, each = r) %>% factor()
+
+
+
+y <- c(11.4, 11.0, 11.3, 9.5,
+          27.8, 29.2, 26.8, 26.0, 
+          47.6, 47.0, 47.3, 45.5,
+          61.6, 62.4, 63.0, 63.9)
+
+
+biscuits <- data.frame(treatment = fac, riseht = y)  #alternatively can use tibble() with same arguments
+
+
+
+```
+
+### (c) Construct in R, the design matrix X corresponding to the model:
+
+$$y_{ij}=\mu+\tau_i+\epsilon_{ij}$$
+ where $\tau_{0.25}$, $\tau_{0.50}$, $\tau_{0.75}$ and $\tau_{1.0}$ are the effects of the levels of the baking powder. All $\epsilon_{ij}\sim N(0,\sigma^2)$ are mutually independent. 
+
+```{r matrix, echo=TRUE, eval=TRUE}
+
+Z <- model.matrix(~fac-1, data = biscuits)
+X<-cbind(1,Z)
+colnames(X)<-c("(Intercept)","0.25 tsp","0.50 tsp","0.75 tsp", "1.0 tsp")
+X
+
+
+```
+
+
+### (d) How many unknown parameters are in the model?
+
+There are 6 unknown parameters in the model. Namely, the four treatment effects $\tau_{0.25}$, $\tau_{0.50}$, $\tau_{0.75}$ and $\tau_{1.0}$, the mean response $\mu$, and the experimental error $\epsilon_{ij}$.
+
+
+
+### (e) Find the rank of the design matrix X. You should justify your answer. Argue that there are 4 independent columns in the matrix.
+
+```{r rank, echo=TRUE, eval=TRUE}
+
+rankMatrix(X)[1]
+
+```
+
+The rank of the design matrix X is therefore equal to 4 as there are 4 independent columns in the matrix. Hence, the model is not full rank or less than full rank, as its rank is less than the overall number of columns which is equal to 5. Intuitively, this makes sense as the given model follows the treatment effects model, which is less than full rank.
+
+
+### (f) Perform the analysis of variance to test the hypothesis of no treatment effect.
+
+In order to investigate whether the treatments have an effect on the experimental unit, we can propose the following hypotheses: 
+
+$$H_{0} : \mu_{0.25} = \mu_{0.50} = \mu_{0.75} = \mu_{1.0}$$
+$$ or\ H_{0} : \tau_{0.25} = \tau_{0.50} = \tau_{0.75} = \tau_{1.0} = 0$$
+$$H_{1} : \ at\ least\ one\ treatment\ effect\ has\ a\ different\ mean$$
+$$or \ H_{1} : \tau_{i} \neq 0 \ for \ some \ i $$
+where $\mu_{0.25}$, $\mu_{0.50}$, $\mu_{0.75}$ and $\mu_{1.0}$ correspond to the mean rise in biscuit height according to each respective amount (tsp) of baking powder. We know that  $\mu_{i} = \mu + \tau_{i}$ so both proposed hypotheses are equivalent and relevant as we are trying to determine the whether there are any treatment effects or not. Hence, if there are no treatment effects, then the second null hypothesis will be accepted as well as the first null hypothesis, as all $\mu_{i} = \mu$, for each treatment level.
+
+```{r aov, echo=TRUE, eval=TRUE}
+
+anova <- aov(riseht ~ treatment, data = biscuits)
+
+summary(anova)
+
+```
+
+
+By inspecting the ANOVA table, it is clear that the calculated P-value is virtually equal to zero, and hence, is less than 0.05. Therefore, we can reject the null hypothesis and infer that there is a significant difference between at least one of the values corresponding to the mean rise in biscuit heights, based on the different treatment effects. In conclusion, there exists an effect on the rise in biscuit height due to the treatments. 
+
+### (g) Formulate a contrast to test the hypothesis that increase in rise height is a linear function of the increase in baking powder in the dough, and test this hypothesis.
+
+First, we investigate the default assignment of treatment contrasts where R automatically assigns the first treatment level as the baseline level. Then we use the `lm()` function to determine whether increase in rise height is a linear function of the increase in baking powder in the dough. We define the hypotheses for this test as follows:
+
+$$H_{0} : \ increase\ in\ rise\ height\ is \ not\ a\ linear\ function\ of\ the\ increase\ in\ baking\ powder\ in \ the\ dough$$
+$$H_{1} : \ increase\ in\ rise\ height\ is \ a\ linear\ function\ of\ the\ increase\ in\ baking\ powder\ in \ the\ dough$$
+
+
+```{r lm, echo=TRUE, eval=TRUE}
+
+contrasts(biscuits$treatment)
+
+
+contrast_lm <- lm(anova) %>% summary()
+contrast_lm
+
+#plot(biscuits$treatment,biscuits$riseht) ...for reference, inspection confirms significant difference in means
+
+
+```
+
+Hence, we can derive $\mu_i=\mu+\tau_i$ for each $i=0.25,0.50,0.75,1.0$ using the generated output. It is clear that our baseline level has a mean of $\mu_{0.25}=\mu = 10.8$, $\mu_{0.50}=10.8+16.65 = 27.45$, $\mu_{0.75}=10.8+36.05 = 46.85$ and $\mu_{1.0}=10.8+51.925 = 62.725$. Intuitively, when considering these results, one can infer that there is a significant difference between the treatment level means, and we did indeed confirm this in the previous question. The only difference with this analysis is that we can now determine which levels specifically contribute to this significant difference. 
+
+By inspecting the `lm()` output, it is clear that the calculated P-values for each treatment level are virtually equal to zero, and hence, are less than 0.05. This implies that significant differences are present between all treatment level means (this is further confirmed by the Tukey’s HSD post hoc procedure below).
+
+```{r tukey, eval=TRUE, echo=TRUE}
+TukeyHSD(anova)
+```
+
+We can further investigate this suspected linearity by using orthogonal polynomial contrasts as seen below.
+
+```{r contrast, eval=TRUE, echo=TRUE}
+
+contrast_eval <- contr.poly(4)
+contrast_eval
+tsps <- gsub("[^0-9.-]", "", levels(biscuits$treatment)) %>% as.numeric() # converting treatment 
+                                                                            #labels to numbers
+
+
+par(mfrow=c(2,2))
+par(mar=c(3,3,1.5,1.5))
+plot(tsps,contrast_eval[,".L"],ylab="rate",main="linear effect")
+plot(tsps,contrast_eval[,".Q"],ylab="rate",main="quadratic effect")
+plot(tsps,contrast_eval[,".C"],ylab="rate",main="cubic effect")
+
+contrasts(biscuits$treatment) <- contrast_eval
+contrasts(biscuits$treatment)
+```
+The plots above infer that we should expect a positive estimated coefficient for the linear term, and negative estimated coefficients for both the quadratic and cubic terms. 
+
+```{r anovas, eval=TRUE, echo=TRUE}
+
+#biscuits$treatment.lin <- rep(contrast_eval[,".L"], times = 4)
+#biscuits$treatment.quad <- rep(contrast_eval[,".Q"], times = 4)
+#biscuits$treatment.cube <- rep(contrast_eval[,".C"], times = 4)
+
+#test <- lm(riseht ~ treatment + treatment.lin + treatment.quad + treatment.cube, biscuits)
+#summary(aov(test))
+
+summary.lm(aov(riseht ~ treatment, data = biscuits))
+
+
+```
+
+The `treatment.L` p-value which corresponds to the linear term stands out as the most significant; the `treatment.C` or cubic term p-value is also less than 0.05 but is considerably larger than the linear term p-value. Therefore, we can reject the null hypothesis and infer that increase in rise height is a linear function of the increase in baking powder in the dough. The results are validated as the estimated coefficients follow our previously explained expectations.
+
+
+### (h) Estimate the variance of the experimental error $\sigma^2$.
+
+```{r var, echo=TRUE, eval=TRUE}
+
+var(anova$residuals)
+```
+
+### (i) Make a plot of residuals versus predicted values and normal plot of residuals and comment on whether the assumptions of the linear model are justified.
+
+```{r plot, echo=TRUE, eval=TRUE}
+
+
+biscuits %>%
+  ggplot(aes(x = as.numeric(treatment), y = riseht)) +
+  geom_point() +
+  geom_smooth(method = lm, formula = y~x, se = FALSE) +
+  xlab("Treatments of Baking Powder ") +
+  ylab("Rise Heights of Biscuits") # fitting linear regression model
+
+qqnorm(anova$residuals)
+qqline(anova$residuals)   # normal plot of residuals
+
+par(mfrow = c(1,2))
+
+plot(anova, which = 1)  # fitted vs residuals
+plot(anova, which = 3) # scale-location
+
+
+
+```
+By inspecting the generated plots we can determine whether the linear model assumptions are upheld. Firstly, the `ggplot` of treatment vs response demonstrates an apparent linear relationship as an increase in tsps of baking powder results in an increase in the rise heights of biscuits. However, when inspecting the Normal Q-Q plot, we see some disparity in our initial assumption as there are noticeable departures from normality with few points straying from the 45-degree reference line. Likewise, the Residuals vs Fitted plot indicates that there are slight fluctuations in variance, as shown by the red line. This presence of a non-constant variance is further confirmed by the Scale-Location plot as there is clearly a significant trend being indicated by the red line. Hence, both the normality and constant variance assumptions have been violated, making it difficult for the assumptions of the linear model to be justified.
+
+### (j) If the dough were made in batches and the four replicate biscuit rise heights in each column (shown in the table above) were all from the same batch, would your answer to (a) be different? How could the data be analyzed if this were the case?
+
+In this case, it would no longer be appropriate to carry out a completely randomised design (CRD) for the experiment. This is because we would no longer be considering the individual biscuits as our experimental units, but rather they would be each of the four batches. By introduction of these batches, there is homogeneity within each of the batches (blocks) as they are made from the same dough, but heterogeneity is induced between the batches as they are made from different dough. Hence, in this situation, under a CRD, the effect of the amount of baking powder becomes confounded, making it difficult to determine whether the differences in biscuit rise heights are in fact due to the baking powder or some other factor in the dough. This problem is overcome by the randomised complete block design (RCBD), which is able to determine the exact cause of variation in biscuit rise heights and therefore, would be suitable to analyse the data in this case, with t = 4 treatment levels and b = 4 blocks (or subgroups of homogeneous experimental units). 
+
+
+## Part 2: Distance Travelled by Paper Airplanes
+
+### (a) Define $\mu_{ij}$ as the mean response for size level $\ i\in$  {A4, A5} and wing aspect ratio level $\ j\in$  {Std, long}. Let $\Delta_{A4} := \mu_{A4, Std} - \mu_{A4, long}$ and $\Delta_{A5} := \mu_{A5, Std} - \mu_{A5, long}$. Show that the noncentrality parameter is given by: $$\lambda = \frac{r(\Delta_{A4}-\Delta_{A5})^2}{4\sigma^2}$$
+
+Theoretically, we know that if there is a difference between the treatment means, then the noncentrality parameter represents the variance of the treatment means and is thus, is expected to be greater than zero. Hence, we can prove the above statement via induction, once we ensure that:
+$$\lambda = \frac{r(\Delta_{A4}-\Delta_{A5})^2}{4\sigma^2} > 0$$ 
+It is easy to realise that the $r(\Delta_{A4}-\Delta_{A5})^2$ term will always be positive due to it being squared and the number of replicates being positive. Likewise, $4\sigma^2$ will always be positive since variance can never be negative. Thus, the overall equation will always be positive as both numerator and denominator as positive. We can also induce this result using the function below.
+
+```{r proof}
+
+lambda<-function(n, r,sigma2,DeltaA4, DeltaA5){
+  Delta = DeltaA4 - DeltaA5
+  if (n==1)
+  {
+    lambda_1 <- n*r*(Delta^2)/(4*sigma2)        #base case where we prove true for n = 1
+    return(lambda_1)
+  }
+  else if (n>1)
+  {
+    k = n 
+    lambda_k <- k*r*(Delta^2)/(4*sigma2)          #we assume that the equation is true for n = k
+    lambda_kplus1 <- (k+1)*r*(Delta^2)/(4*sigma2)   #induction step
+    lambda_ncp = r*(Delta^2)/(4*sigma2) 
+    
+    if (lambda_k&lambda_kplus1 > 0)
+    { return(lambda_ncp)
+    }
+  }
+    
+  }
+  
+lambda(1, 5, 0.39, 0.5, 1.3)    
+lambda(2, 7, 0.22, 5.8, 4.6 )
+lambda(3, 10, 0.43, -1.2, 0.4)
+
+```
+The output above clearly shows that for differing values of replicates, variance and treatment level means, the noncentrality parameter is always greater than zero and thus we conclude our proof.
+
+### (b) Before running the main experiment, you will need to perform a simple pilot experiment in order to estimate the variance parameter $\sigma^2$. You should perform $\ n_{pilot} = 10$ throws with 10 different planes. Specifically of size A5 and of the standard wing design. Denote by $\ w_{1},...,\ w_{10}$  the observed distance values. You should estimate the variance in the usual way, that is, $$\sigma^2 = \frac{1}{\ n_{pilot}-1}\sum_{i=1}^{10}(\ w_i-\bar{\ w})^2, \bar{\ w} = \frac{1}{10}\sum_{i=1}^{10}\ w_i$$
+
+The pilot throws and actual experiment were both carried out in the foyer of the 4W building. Distance travelled by the planes were initially recorded as the number of tiles travelled and then converted to meters. Each tile was measured to be 60cm. 
+
+```{r samplevar, eval=TRUE, echo=TRUE}
+
+n_pilot <- c(8.3, 10.2, 8.7, 11.4, 7.9, 9.1, 9.2, 8.6, 8.2, 7.6) * 60 / 100
+
+# n_pilot values correspond to amount of tiles traveled by paper plane
+# one tile = 60 cm 
+# divide by 100 to get values in meters 
+
+
+
+sigma2 <- var(n_pilot)
+
+```
+
+
+### (c) We are expecting both $\Delta_{A4} > 0$ as well as $\Delta_{A5} > 0$. An absolute difference of $\Delta := \vert \Delta_{A5}-\Delta_{A4} \vert = 1.5$ meters will be considered of practical importance and we would like to detect such a difference with high power. Using $\Delta = 1.5$ and $\widehat{\sigma^2}$, determine the number of replicates necessary to achieve at least 90% power. The number of replicates per combination of factor level should be less than 13, that is $\ r \leq 13$. You should use a significance level of $\alpha = 0.05$.
+
+```{r reps, echo=TRUE, eval=TRUE}
+
+# t = 2
+# s = 2
+
+Fpower<-function(r,sigma2,Delta){ 
+  df1<-1                                  #df1 = (t-1)*(s-1)
+  df2<-4*(r-1)                              #df2 = s*t*(r-1)
+  Fc<-qf(0.95,df1,df2) 
+  lambda<-r*(Delta^2)/(4*sigma2) 
+  pf(Fc,df1,df2,lambda,lower.tail = FALSE) 
+}
+
+Fpower(5, sigma2, 1.5)
+Fpower(7, sigma2, 1.5)
+Fpower(9, sigma2, 1.5)
+Fpower(10, sigma2, 1.5) # achieves > 90% power, therefore use r = 10 replicates
+
+
+```
+
+By running the `Fpower` function with our derived variance, an absolute difference of 1.5 and increasing replicates, there is a corresponding increase in power. With 10 replicates, we finally achieve a power of 92% (>90%) and so, we use this as the number of replicates for the main experiment.
+
+### (d) Now perform the main experiment with the number of replicates r obtained in the previous question. Report the vector of values y and then perform the test of hypothesis described above with $\alpha = 0.05$.
+
+We want to test the null hypothesis of no interactions which is given by:
+
+$$\ H_{0} :  \gamma_{ij} = 0 \ for \ all \ (i,j) $$
+$$\ H_{1} :  \gamma_{ij} \neq 0 \ for \ some \ (i,j) $$
+where $\gamma_{ij}$ are the effects of the interactions. 
+
+```{r experiment, eval=TRUE, echo=TRUE}
+#set.seed(123)
+#f<-rep(c("A4,Std","A5,Std","A4,long","A5,long"),each=10)
+#sample(f,40) ...randomising throws
+
+
+paper_type <- rep(c("A4", "A5"), each = 20) %>% factor()  
+
+wing_span <- rep(c("Std", "long"), each = 10) %>% factor()
+
+
+distance <- c(6.8, 6.2, 5.4, 6.3, 10.1, 6.5, 6.5, 5.5, 9.7, 7.0, 9.8, 9.1, 8.6, 8.2, 7.8, 
+              8.5, 7.9, 7.8, 9.4, 7.6, 6.2, 7.3, 5.8, 7.9, 8.1, 7.5, 8.5, 7.7, 9.2, 
+              9.6, 7.0, 5.5, 5.7, 6.0, 6.9, 6.1, 7.5, 5.9, 7.4, 7.0)
+
+
+planes <- data.frame(paper_type = paper_type, wing_span = wing_span, distance = distance)
+planes
+
+
+aggregate(distance ~ wing_span+paper_type, data = planes, mean)  # means of each combination type
+
+delta_A4 <- mean(planes[1:10,3]) - mean(planes[11:20,3])
+delta_A5 <- mean(planes[21:30,3]) - mean(planes[31:40,3])
+delta_abs <- abs(delta_A5 - delta_A4)
+delta_abs  # absolute difference of 2.75
+lambda(2,10, sigma2, delta_A4, delta_A5)  # extra derivation of noncentrality parameter
+
+```
+From the means of each plane combination, we can infer that the longer wing span results in a greater mean distance traveled in A4 planes whereas A5 planes with standard wing spans have a greater mean distance traveled. Likewise, it can be argued that the planes with standard wing spans have a decreased performance when made with heavier A4 paper and an increased performance when made with lighter A5 paper. Conversely, planes with longer wing spans have an increased performance when made with heavier A4 paper and a decreased performance when made with lighter A5 paper.
+
+```{r interaction, eval=TRUE, echo=TRUE}
+
+mod <- aov( distance ~ paper_type * wing_span, data = planes) %>% summary()
+mod # individual main effects not significant but their interaction is; 
+        #also confirmed by interaction plot below
+```
+
+From the ANOVA output, we can see that the individual main effects are not significant as their p-values are greater than 0.05. However, the interaction p-value is notably less than 0.05 and so we can therefore reject the null hypothesis and conclude that the interaction between both factors is significant. 
+
+```{r interaction plot, eval=TRUE, echo=TRUE}
+
+with(planes, (interaction.plot(paper_type, wing_span, distance, type = "b",
+ pch = c(18,24,22), leg.bty = "o",
+ main = "Interaction Plot of Paper Type and Wing Length",
+ xlab = "Paper Type",ylab = "Distance")))
+
+# cross-over interaction where main effects of either paper type or wing length 
+# are insignificant but their interaction is
+```
+We can visualise this interaction by the interaction plot above. Particularly, this is a case of cross-over or disordinal interaction, where one factor has one kind of effect in one condition and the opposite kind of effect in another condition. In our case, increased wing span has a positive effect on A4 planes and a negative effect on A5 planes. Similarly, standard wing span has a negative effect on A4 planes and a negative effect on A5 planes.
+
+### (e) Discuss briefly about any lurking variables that might have played a role in your experiment. You should mention at least three lurking variables and how they might have biased the result of your experiment.
+
+Firstly, an individual's height may have induced bias as it is plausible that taller individuals could have resulted in a greater distances traveled by the plane. This is because the plane would have been thrown from a greater height thus meaning that it would have been possible to have more flying time once thrown properly. Likewise, the length of an individual's arm could have also induced bias as those with longer arms may have been able to throw planes further, versus persons with shorter arms. Similarly, the strength/power at which one threw the plane could have also induced bias as if it was thrown with more power, it would have been able to travel a greater distance. Lastly, the grammage (or density) of the paper used would have introduced bias, as for paper with greater grammage, there is increased weight of the paper and thus, reduced flight distance and vice versa.
+
+
+
