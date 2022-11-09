@@ -1,0 +1,42 @@
+PrimaryActivityCode,SecondaryActivityCode,DescriptiveLabel,StartDate,UniBathWeekNo,DayOfWeek,StartTime,EndTime,DurationMins,EnjoymentScore,MoodScore,ProductivityScore
+O733,,wake up/get ready,20/02/2022,20,Sunday,10:30,11:30,60,0,1,
+ED145,L418,brunch,20/02/2022,20,Sunday,11:30,13:15,105,2,2,
+L418,R523,bookstore visit,20/02/2022,20,Sunday,13:15,14:00,45,2,2,
+L418,UD415,return home/relax,20/02/2022,20,Sunday,14:00,16:00,120,1,1,
+CW982,,ads lab,20/02/2022,20,Sunday,16:00,19:30,210,1,1,4
+ED145,H179,meal prep/dinner,20/02/2022,20,Sunday,19:30,21:30,120,1,1,
+L418,UD415,netflix,20/02/2022,20,Sunday,21:30,23:00,90,2,1,
+O733,,getting ready for bed,20/02/2022,20,Sunday,23:00,23:15,15,0,1,
+R523,L418,book time before bed,20/02/2022,20,Sunday,23:15,23:45,30,2,1,
+S801,,zzZ,20/02/2022,20,Sunday,23:45,08:00,495,2,1,
+O733,UD415,wake up/check phone/get ready,21/02/2022,21,Monday,08:00,10:00,120,0,1,
+ED145,,breakfast,21/02/2022,21,Monday,10:00,11:00,60,1,1,
+L418,,relaxing before class,21/02/2022,21,Monday,11:00,12:15,75,1,1,
+EL642,,online lecture,21/02/2022,21,Monday,12:15,13:15,60,1,1,3
+T695,,to campus,21/02/2022,21,Monday,13:15,14:15,60,0,1,
+EL642,,in-person lecture,21/02/2022,21,Monday,14:15,15:15,60,1,1,3
+T695,,back to flat,21/02/2022,21,Monday,15:15,16:00,45,1,1,
+ED145,,dinner,21/02/2022,21,Monday,16:00,16:30,30,2,2,
+CW982,,ads lab,21/02/2022,21,Monday,16:30,18:00,90,0,1,3
+EL642,,reviewing lectures,21/02/2022,21,Monday,18:00,19:30,90,0,1,3
+L418,UD415,netflix,21/02/2022,21,Monday,19:30,21:15,105,2,2,
+O733,,getting ready for bed,21/02/2022,21,Monday,21:15,21:30,15,0,1,
+R523,L418,book time before bed,21/02/2022,21,Monday,21:30,22:00,30,2,1,
+S801,,zzZ,21/02/2022,21,Monday,22:00,06:30,510,1,0,
+O733,,wake up/check phone/get ready,22/02/2022,21,Tuesday,06:30,07:15,45,0,0,
+ED145,,breakfast,22/02/2022,21,Tuesday,07:15,07:45,30,0,0,
+T695,,to campus,22/02/2022,21,Tuesday,07:45,08:15,30,1,0,
+R523,L418,waiting for lecture,22/02/2022,21,Tuesday,08:15,09:15,60,2,1,
+EL642,,in-person lecture,22/02/2022,21,Tuesday,09:15,10:15,60,0,0,2
+EL642,,in-person lecture,22/02/2022,21,Tuesday,10:15,11:15,60,0,0,3
+EL642,,in-person lab,22/02/2022,21,Tuesday,11:15,12:15,60,1,1,3
+T695,,back to flat,22/02/2022,21,Tuesday,12:15,13:00,45,1,1,
+ED145,,lunch,22/02/2022,21,Tuesday,13:00,13:30,30,1,1,
+S801,L418,nap,22/02/2022,21,Tuesday,13:30,16:15,165,2,1,
+EL642,,online lecture,22/02/2022,21,Tuesday,16:15,17:15,60,0,1,3
+UD415,L418,video call with family,22/02/2022,21,Tuesday,17:15,18:30,75,2,2,
+ED145,,dinner,22/02/2022,21,Tuesday,18:30,19:00,30,2,2,
+L418,UD415,netflix,22/02/2022,21,Tuesday,19:00,20:30,90,2,2,
+CW982,,applied stats lab,22/02/2022,21,Tuesday,20:30,23:30,180,1,1,4
+O733,,getting ready for bed,22/02/2022,21,Tuesday,23:30,23:45,15,0,1,
+S801,,zzZ,22/02/2022,21,Tuesday,23:45,07:45,480,2,1,
